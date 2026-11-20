@@ -1,4 +1,5 @@
 pub mod contract;
+mod follow;
 mod local;
 mod protocol;
 
@@ -6,6 +7,7 @@ use std::path::Path;
 
 use contract::OpenBoard;
 
+pub use follow::OpenBoardFollower;
 pub use local::{token_folder, token_folder_from_environment};
 
 pub async fn find_open_board(token_folder: &Path) -> OpenBoard {

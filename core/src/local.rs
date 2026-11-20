@@ -30,6 +30,33 @@ pub fn token_folder_from_environment() -> Option<PathBuf> {
     token_folder(xdg_config_home.as_deref(), home.as_deref())
 }
 
+#[derive(PartialEq, Eq)]
+pub struct TokenFolderSnapshot {
+    files_with_their_write_times: Vec<(PathBuf, Option<SystemTime>)>,
+}
+
+pub fn snapshot_token_folder(token_folder: &Path) -> TokenFolderSnapshot {
+    let Ok(entries) = fs::read_dir(token_folder) else {
+        return TokenFolderSnapshot {
+            files_with_their_write_times: Vec::new(),
+        };
+    };
+    let mut files_with_their_write_times: Vec<(PathBuf, Option<SystemTime>)> = entries
+        .filter_map(Result::ok)
+        .map(|entry| {
+            let written_at = entry
+                .metadata()
+                .ok()
+                .and_then(|metadata| metadata.modified().ok());
+            (entry.path(), written_at)
+        })
+        .collect();
+    files_with_their_write_times.sort();
+    TokenFolderSnapshot {
+        files_with_their_write_times,
+    }
+}
+
 pub fn local_boards_newest_first(token_folder: &Path) -> Vec<LocalBoard> {
     let Ok(entries) = fs::read_dir(token_folder) else {
         return Vec::new();

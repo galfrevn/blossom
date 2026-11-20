@@ -2,8 +2,9 @@ mod support;
 
 use blossom::contract::{OpenBoard, Person};
 use blossom::find_open_board;
-use support::{start_board_whose_discovery_names, start_fake_board, write_token_file};
+use support::{FakeBoard, answer_discovery_naming, answer_me, start_fake_board, write_token_file};
 use tempfile::TempDir;
+use wiremock::MockServer;
 
 fn ada() -> Person {
     Person {
@@ -190,4 +191,17 @@ async fn a_board_whose_discovery_names_another_url_is_not_opened() {
     let open_board = find_open_board(token_folder.path()).await;
 
     assert_eq!(open_board, OpenBoard::NoneRunning);
+}
+
+async fn start_board_whose_discovery_names(
+    other_url: &str,
+    token: &str,
+    handle: &str,
+    name: &str,
+) -> FakeBoard {
+    let server = MockServer::start().await;
+    let url = format!("{}/api/board", server.uri());
+    answer_discovery_naming(&server, other_url).await;
+    answer_me(&server, token, handle, name).await;
+    FakeBoard { server, url }
 }

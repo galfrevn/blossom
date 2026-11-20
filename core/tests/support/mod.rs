@@ -20,20 +20,7 @@ pub async fn start_fake_board(token: &str, handle: &str, name: &str) -> FakeBoar
     FakeBoard { server, url }
 }
 
-pub async fn start_board_whose_discovery_names(
-    other_url: &str,
-    token: &str,
-    handle: &str,
-    name: &str,
-) -> FakeBoard {
-    let server = MockServer::start().await;
-    let url = format!("{}/api/board", server.uri());
-    answer_discovery_naming(&server, other_url).await;
-    answer_me(&server, token, handle, name).await;
-    FakeBoard { server, url }
-}
-
-async fn answer_me(server: &MockServer, token: &str, handle: &str, name: &str) {
+pub async fn answer_me(server: &MockServer, token: &str, handle: &str, name: &str) {
     let me = json!({
         "actor": format!("local:user:{handle}"),
         "principal": format!("local:user:{handle}"),
@@ -53,7 +40,7 @@ async fn answer_me(server: &MockServer, token: &str, handle: &str, name: &str) {
         .await;
 }
 
-async fn answer_discovery_naming(server: &MockServer, url: &str) {
+pub async fn answer_discovery_naming(server: &MockServer, url: &str) {
     let discovery = json!({
         "version": "0.54.0",
         "url": url,

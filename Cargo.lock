@@ -698,6 +698,7 @@ dependencies = [
  "blossom",
  "tauri",
  "tauri-build",
+ "tokio",
 ]
 
 [[package]]
