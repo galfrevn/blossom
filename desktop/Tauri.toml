@@ -1,0 +1,39 @@
+productName = "Blossom"
+mainBinaryName = "blossom"
+identifier = "io.github.galfrevn.blossom"
+
+[build]
+devUrl = "http://localhost:5173"
+frontendDist = "../ui/dist"
+beforeDevCommand = { script = "bun run dev", cwd = "../ui" }
+beforeBuildCommand = { script = "bun run build", cwd = "../ui" }
+
+[[app.windows]]
+label = "main"
+title = "Blossom"
+width = 1200
+height = 780
+minWidth = 720
+minHeight = 480
+visible = false
+titleBarStyle = "Overlay"
+hiddenTitle = true
+trafficLightPosition = { x = 16, y = 21 }
+
+[app.security]
+csp = "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src ipc: http://ipc.localhost"
+devCsp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws://localhost:5173"
+
+[[app.security.capabilities]]
+identifier = "window"
+windows = ["main"]
+permissions = ["core:window:allow-start-dragging"]
+
+[bundle]
+active = true
+targets = ["dmg"]
+icon = ["icons/icon.png", "icons/icon.icns"]
+resources = { "../ui/node_modules/geist/LICENSE.txt" = "licenses/geist.txt" }
+
+[bundle.macOS]
+minimumSystemVersion = "13.3"

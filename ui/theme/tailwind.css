@@ -1,0 +1,52 @@
+@import "tailwindcss";
+@import "./tokens.css";
+@import "./fonts.css";
+
+@theme inline {
+  --color-*: initial;
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-petal: var(--petal);
+  --color-petal-soft: var(--petal-soft);
+  --color-petal-deep: var(--petal-deep);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-wash: var(--accent-wash);
+  --color-accent-line: var(--accent-line);
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
+  --font-pixel: "Geist Pixel", "Geist", sans-serif;
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+
+  :root[data-theme="light"] {
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+  }
+
+  html,
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+}
