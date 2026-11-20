@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
-    "check": "cargo run --quiet --package conventions && cargo fmt --all --check && cargo clippy --workspace --all-targets --quiet -- --deny warnings && cargo test --workspace --quiet && biome check && bun run --cwd ui types && bun run --cwd ui test"
+    "check": "cargo run --quiet --package conventions && cargo fmt --all --check && cargo clippy --workspace --all-targets --quiet -- --deny warnings && cargo test --workspace --quiet && biome check && bun run --cwd ui types && bun run --cwd ui test && bun run --cwd ui build && sh budgets.sh javascript"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",
