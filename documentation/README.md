@@ -44,6 +44,10 @@ documentation/
 | 0014 | The project is called Blossom | accepted | [adr/product/name.md](adr/product/name.md) |
 | 0015 | Code explains itself: no comments, one-word files, full-word names | accepted | [adr/architecture/conventions.md](adr/architecture/conventions.md) |
 | 0016 | Soft paper, warm ink, and a cherry blossom accent | accepted | [adr/design/identity.md](adr/design/identity.md) |
+| 0017 | One repository in three parts: core, desktop and ui | accepted | [adr/architecture/layout.md](adr/architecture/layout.md) |
+| 0018 | The UI reaches the core through one contract, generated from Rust | accepted | [adr/architecture/contract.md](adr/architecture/contract.md) |
+| 0019 | Tailwind for styles | accepted | [adr/architecture/styles.md](adr/architecture/styles.md) |
+| 0020 | The app's identifier is io.github.galfrevn.blossom | accepted | [adr/architecture/identifier.md](adr/architecture/identifier.md) |
 
 "Proposed" means the decision was recommended and shown but not confirmed explicitly. Purely technical decisions in the core were delegated to Claude and are recorded as accepted for review; they say so in their first line.
 
@@ -64,7 +68,7 @@ The rules for writing code are in `CLAUDE.md` at the repository root.
 
 ## Research
 
-- [research/board.md](research/board.md): what Vercel shipped, the protocol, its limits, and how a client authenticates.
+- [research/board.md](research/board.md): what Vercel shipped, the protocol, its limits, how a client authenticates, and how it finds a local board.
 - [research/landscape.md](research/landscape.md): community UIs for Board and the neighbouring market.
 - [research/stack.md](research/stack.md): Tauri, GPUI, sync engines and fonts.
 

@@ -55,8 +55,21 @@ A board behind `tailscale serve` takes no token: Tailscale tells the board who i
 
 For this project that means local and tailnet boards are easy to reach from Rust. Reading or renewing the development token for Vercel's hosted board from Rust is untested.
 
+## How a client finds a local board
+
+Read from the source at commit `bff12dc` on 2026-11-20, in `packages/board/src/cli/serve.ts` and `packages/board/src/client/node.ts`.
+
+- `vb serve` listens on `127.0.0.1` only, at `http://127.0.0.1:4100/api/board` by default. `--port` picks another, so a board on 4100 is likely but not certain.
+- While it runs, it leaves one file per board in `~/.config/board/local/`, or under `$XDG_CONFIG_HOME` when that is set. Only its user can read the file. The file is named after the first 32 hex characters of the SHA-256 of the board's URL, without a trailing slash, and holds `{ url, token, handle }`. It is deleted when `vb serve` stops.
+- The token is an ES256 JWT whose audience is the board's URL. It is valid for 30 days, but it is signed with a key that lives only as long as the run. A file left behind by a run that was killed holds a token no board accepts.
+- `GET` on the board's URL is discovery and takes no token. It answers `{ version, url, audience, team_id, project_id, sync, wake_by_path? }`.
+
+What this means here: the app can find every local board without scanning ports. It lists the files in that folder and confirms each one with discovery before trusting it.
+
 ## Sources
 
 - https://vercel.com/blog/introducing-vercel-board
-- https://github.com/vercel/board (README, and under `packages/board/docs`: the "Build a UI" and "Inspector" guides, the HTTP, CLI and tasks references, "Local boards", "Reading")
+- https://github.com/vercel/board (README, and under `packages/board/docs`: the "Build a UI" and "Inspector" guides, the HTTP, CLI and tasks references, "Local boards", "Reading", "Identity")
+- https://github.com/vercel/board/blob/bff12dc30e1729fb42b18a233cc8b1f4a77e90ba/packages/board/src/cli/serve.ts
+- https://github.com/vercel/board/blob/bff12dc30e1729fb42b18a233cc8b1f4a77e90ba/packages/board/src/client/node.ts
 - https://thenewstack.io/vercel-board-agent-swarms/
