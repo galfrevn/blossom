@@ -1,0 +1,13 @@
+[package]
+name = "conventions"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ra-ap-rustc_lexer = "0.185.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints]
+workspace = true

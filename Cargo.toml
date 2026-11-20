@@ -1,0 +1,14 @@
+[workspace]
+resolver = "3"
+members = ["conventions"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.93"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"

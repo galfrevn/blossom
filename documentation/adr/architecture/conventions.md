@@ -18,4 +18,4 @@ Quality and scale come before speed of delivery in this project, and the code is
 - A reason that has to outlive the code goes in an ADR, not next to the line.
 - Source files carry no license header. The license is stated once, at the root.
 - Names a tool dictates (`Cargo.toml`, `package.json`, `README.md`) are the only exceptions to the naming rule. Where a tool lets a name be configured, it is configured: Tauri's default `src-tauri` folder, for example, gets a one-word name.
-- Nothing enforces these rules yet. Once there is a toolchain they should be checked by lint and in CI, so they do not depend on anyone remembering them.
+- The rules are checked by machine wherever a machine can tell: the `conventions` crate checks names and comments, and Clippy checks `unwrap` and `expect`, all through `bun run check`. Whether a name is long and descriptive enough is still left to review.

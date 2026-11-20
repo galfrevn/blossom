@@ -16,7 +16,7 @@ When quality and speed of delivery conflict, quality wins.
 
 **Long and obvious beats short and clever.** Identifiers are full words that say what the thing is: `unreadMessageCount`, `leaseExpiresAt`, `index`. Prefer named intermediate values and early returns to chained one-liners and nested conditionals. Domain concepts use the exact terms in `GLOSSARY.md`.
 
-**One word per file, folders for the rest.** Every file and folder name is a single lowercase English word. When a name wants a second word, the first becomes a folder: `attention/list.tsx`, `replica/merge.rs`. The only exceptions are names a tool dictates (`Cargo.toml`, `package.json`, `README.md`); where the tool lets the name be configured, configure it.
+**One word per file, folders for the rest.** Every file and folder name is a single lowercase English word. When a name wants a second word, the first becomes a folder: `attention/list.tsx`, `replica/merge.rs`. A test file sits in a `tests` folder beside the code it tests: `attention/tests/list.tsx` tests `attention/list.tsx`. The only exceptions are names a tool dictates (`Cargo.toml`, `package.json`, `README.md`); where the tool lets the name be configured, configure it.
 
 **No slop.** Every line earns its place:
 
@@ -29,6 +29,8 @@ When quality and speed of delivery conflict, quality wins.
 **Built for a fleet.** Every list, query and render path assumes hundreds of agents and 100,000 messages.
 
 **Tests first.** Behaviour is specified by a failing test before the code that satisfies it.
+
+**Done means `bun run check` passes.** It runs everything CI runs, including the check of these naming and comment rules.
 
 ## Agent skills
 

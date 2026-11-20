@@ -15,3 +15,4 @@ The repository holds the whole product. A Cargo workspace has two crates: the co
 - `ui` is the one abbreviation in a name. It was chosen over `interface` on purpose; do not rename it.
 - The core is one crate with modules. It is split only when a second consumer or compile times ask for it.
 - The core never depends on Tauri, so its tests and lints run on any machine. Only the desktop build needs macOS.
+- The workspace also holds `conventions`, a development-only crate that checks the naming and comment rules of ADR 0015. It is never shipped, and nothing in the product depends on it.
