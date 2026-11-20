@@ -5,11 +5,13 @@ type BoardThatIsOpen = Extract<OpenBoard, { kind: "open" }>;
 
 export function StatusBar({ openBoard }: { openBoard: BoardThatIsOpen }) {
   return (
-    <footer className="flex h-[26px] shrink-0 items-center justify-between border-t border-line px-3 text-[11px] text-ink-2">
-      <span className="font-mono">{openBoard.url}</span>
-      <span className="flex gap-1.5">
-        <span className="text-ink">{openBoard.person.name}</span>
-        <span className="text-ink-3">
+    <footer className="flex h-[26px] shrink-0 items-center justify-between gap-6 border-t border-line px-3 text-[11px] text-ink-2">
+      <span className="min-w-0 truncate font-mono">{openBoard.url}</span>
+      <span className="flex min-w-0 max-w-[50%] gap-1.5">
+        <span className="min-w-0 truncate text-ink">
+          {openBoard.person.name}
+        </span>
+        <span className="shrink-0 text-ink-3">
           {dictionary.status.handle(openBoard.person.handle)}
         </span>
       </span>
