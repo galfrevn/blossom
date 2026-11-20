@@ -1,6 +1,6 @@
 mod css;
 mod rust;
-mod typescript;
+mod script;
 
 use std::path::Path;
 
@@ -8,7 +8,7 @@ use oxc_span::SourceType;
 
 pub enum Language {
     Rust,
-    TypeScript(SourceType),
+    JavaScriptOrTypeScript(SourceType),
     Css,
 }
 
@@ -16,7 +16,9 @@ pub fn language_of(path: &Path) -> Option<Language> {
     let extension = path.extension()?.to_str()?;
     match extension {
         "rs" => Some(Language::Rust),
-        "ts" | "tsx" => SourceType::from_path(path).ok().map(Language::TypeScript),
+        "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs" => SourceType::from_path(path)
+            .ok()
+            .map(Language::JavaScriptOrTypeScript),
         "css" => Some(Language::Css),
         _ => None,
     }
@@ -25,7 +27,9 @@ pub fn language_of(path: &Path) -> Option<Language> {
 pub fn lines_with_a_comment(language: &Language, source: &str) -> Vec<usize> {
     match language {
         Language::Rust => rust::lines_with_a_comment(source),
-        Language::TypeScript(source_type) => typescript::lines_with_a_comment(source, *source_type),
+        Language::JavaScriptOrTypeScript(source_type) => {
+            script::lines_with_a_comment(source, *source_type)
+        }
         Language::Css => css::lines_with_a_comment(source),
     }
 }

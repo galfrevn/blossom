@@ -33,11 +33,19 @@ fn is_one_word(segment: &OsStr) -> bool {
     if let Some(dotfile_name) = segment.strip_prefix('.') {
         return is_lowercase_word(dotfile_name);
     }
-    let (stem, extension) = segment.split_once('.').unwrap_or((segment, ""));
-    let extension_is_one_part = !extension.contains('.');
-    is_lowercase_word(stem) && extension_is_one_part
+    let Some((stem, extension)) = segment.split_once('.') else {
+        return is_lowercase_word(segment);
+    };
+    is_lowercase_word(stem) && is_lowercase_extension(extension)
 }
 
 fn is_lowercase_word(text: &str) -> bool {
     !text.is_empty() && text.chars().all(|character| character.is_ascii_lowercase())
+}
+
+fn is_lowercase_extension(extension: &str) -> bool {
+    !extension.is_empty()
+        && extension
+            .chars()
+            .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
 }

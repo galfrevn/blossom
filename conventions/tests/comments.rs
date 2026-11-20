@@ -190,3 +190,33 @@ fn a_nested_block_comment_is_reported_once_at_the_line_it_opens() {
         }]
     );
 }
+
+#[test]
+fn a_comment_in_any_javascript_or_typescript_module_is_reported() {
+    let module_files = [
+        "ui/scripts/one.js",
+        "ui/scripts/two.jsx",
+        "ui/scripts/three.mjs",
+        "ui/scripts/four.cjs",
+        "ui/scripts/five.mts",
+        "ui/scripts/six.cts",
+    ];
+    let files: Vec<(&str, &str)> = module_files
+        .iter()
+        .map(|path| (*path, "// a note\nexport const value = 1;\n"))
+        .collect();
+    let tree = write_tree(&files).unwrap();
+
+    let violations = check(tree.directory.path(), &tree.paths).unwrap();
+
+    let reported_paths: Vec<PathBuf> = violations
+        .into_iter()
+        .map(|violation| match violation {
+            Violation::Comment { path, .. } => path,
+            Violation::NameIsNotOneWord { path } => path,
+        })
+        .collect();
+    let mut expected_paths: Vec<PathBuf> = module_files.iter().map(PathBuf::from).collect();
+    expected_paths.sort();
+    assert_eq!(reported_paths, expected_paths);
+}

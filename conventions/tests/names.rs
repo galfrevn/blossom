@@ -103,3 +103,31 @@ fn a_second_word_after_a_dot_is_reported() {
         }]
     );
 }
+
+#[test]
+fn an_extension_that_is_not_lowercase_is_reported() {
+    let tree = write_tree(&[("desktop/icons/icon.PNG", "")]).unwrap();
+
+    let violations = check(tree.directory.path(), &tree.paths).unwrap();
+
+    assert_eq!(
+        violations,
+        vec![Violation::NameIsNotOneWord {
+            path: PathBuf::from("desktop/icons/icon.PNG")
+        }]
+    );
+}
+
+#[test]
+fn an_empty_extension_is_reported() {
+    let tree = write_tree(&[("notes.", "")]).unwrap();
+
+    let violations = check(tree.directory.path(), &tree.paths).unwrap();
+
+    assert_eq!(
+        violations,
+        vec![Violation::NameIsNotOneWord {
+            path: PathBuf::from("notes.")
+        }]
+    );
+}
