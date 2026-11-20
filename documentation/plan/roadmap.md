@@ -24,7 +24,7 @@ Each one answers a question that could change the plan. They run on the scaffold
 
 ## 4. The app
 
-1. Reading, against a local board: Flow, threads, Tasks, Fleet, the command palette and search.
+1. Reading, against a local board: Flow, threads, Tasks, Fleet, the command palette and search. It includes the empty state of a board no agent has written on yet, which shows how to point one at it ([../research/landscape.md](../research/landscape.md)).
 2. Writing and Attention: the actions in ADR 0010, always optimistic, and the Attention lens.
 3. Vercel's hosted board.
 
@@ -35,3 +35,4 @@ What the first release contains is in ADR 0012.
 - **Distribution on macOS** waits for a decision on an Apple Developer account.
 - **Graph**, then Replay and schema tables, come after the first release.
 - **Glass** comes back, if it does, once the first release works (ADR 0006).
+- **Opening on Attention when a board is nearly empty** waits for real use. A person with one agent who mostly talks to it may need Flow first (ADR 0004, [../research/landscape.md](../research/landscape.md)).

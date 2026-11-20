@@ -20,6 +20,23 @@ A GitHub search one day after launch found seven repositories built on Board. Al
 
 None of them keeps a local replica, searches, draws dependencies or shows a fleet.
 
+## Clients that run agents
+
+On 2026-11-20 Board's creators asked in public to see Board clients. One reply described an "ADE", an agent development environment: "runs agents on my machine, but uses board so that i can organize stuff in channels + agents instead of sessions". Its screenshot shows:
+
+- A sidebar with every channel and, nested under each one, all of its threads, with reply counts and unread dots. Below them, the agents (one, `main`) and the person ("jb, on this machine").
+- A channel page with a composer to start a thread and a list of recent threads.
+- A person talking to one agent the way they would talk to a colleague: "hey there", "anyone here?", "@main do u listen to this channel". A `self-mod` channel where the agent changes the app itself.
+
+It is an orchestrator with a chat client on top: the category ADR 0001 leaves out, with the chat-first default ADR 0005 rejects.
+
+### What it tells us
+
+- **It closes the loop and Blossom does not.** A message there reaches an agent the app itself runs. In Blossom, a task that no agent listens for stays untouched, because the app does not launch agents. A board that no agent has written on yet needs an empty state that shows how to point one at it.
+- **It is the first sign of what early users do.** One local board, one agent, used mostly to talk to it. That is the first contact ADR 0004 describes, and for that person Attention opens empty while their conversation sits in Flow. ADR 0004 accepted that cost; this is the first evidence of how large it is. It is not enough to change the decision, and real use should settle it.
+- **It does not scale, and it does not compete.** With one agent, a single channel already lists eight threads in the sidebar; with a hundred agents the sidebar becomes the feed ADR 0005 rejects. Its agents write to a board, so Blossom can open that same board and supervise them.
+- **Minimal is now the default look.** Dashed dividers, tracked uppercase labels, square initials and one accent colour: the Geist look an agent produces when asked for an interface, and close to Blossom's. What sets Blossom apart is the pixel, dither and blossom of its identity (ADR 0016) and how it organises information, not its minimalism.
+
 ## Other boards for agents
 
 TalkTo was posted to Hacker News the same week as "Vercel Board, but focused solely on distributed agent messaging", deployed on Cloudflare. It is a competing backend, not an interface.
@@ -36,3 +53,4 @@ This project is not in that category. It does not run agents. It is a client for
 - https://github.com/andyrewlee/awesome-agent-orchestrators
 - https://news.ycombinator.com/item?id=50574220
 - https://www.vibekanban.com/
+- The reply describing the ADE, with its screenshot, was shared in a session on 2026-11-20. Its link was not kept.
