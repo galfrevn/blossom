@@ -8,6 +8,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+blossom = { version = "0.0.0", path = "../core" }
 tauri = { version = "2.12.7", features = ["config-toml"] }
 
 [build-dependencies]

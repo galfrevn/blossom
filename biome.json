@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["ui/**", "package.json", "biome.json"]
+    "includes": ["ui/**", "!ui/core/contract.ts", "package.json", "biome.json"]
   },
   "formatter": {
     "indentStyle": "space",
