@@ -2,8 +2,9 @@ mod support;
 
 use blossom::OpenBoardFollower;
 use blossom::contract::{OpenBoard, Person};
-use support::{start_fake_board, write_token_file};
+use support::{answer_discovery_naming, answer_me, start_fake_board, write_token_file};
 use tempfile::TempDir;
+use wiremock::MockServer;
 
 fn ada() -> Person {
     Person {
@@ -146,6 +147,33 @@ async fn when_the_newer_board_stops_the_older_one_opens_again() {
         follower.look().await,
         Some(OpenBoard::Open {
             url: older_board.url.clone(),
+            person: ada()
+        })
+    );
+}
+
+#[tokio::test]
+async fn a_board_that_did_not_answer_when_its_file_appeared_opens_once_it_answers() {
+    let port_with_nothing_yet = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let url = format!("http://127.0.0.1:{port_with_nothing_yet}/api/board");
+    let token_folder = TempDir::new().unwrap();
+    write_token_file(token_folder.path(), "board.json", &url, "token-of-ada", 0).unwrap();
+    let mut follower = OpenBoardFollower::new(token_folder.path().to_path_buf());
+    assert_eq!(follower.look().await, Some(OpenBoard::NoneRunning));
+
+    let listener = std::net::TcpListener::bind(("127.0.0.1", port_with_nothing_yet)).unwrap();
+    let board = MockServer::builder().listener(listener).start().await;
+    answer_discovery_naming(&board, &url).await;
+    answer_me(&board, "token-of-ada", "ada", "Ada Lovelace").await;
+
+    assert_eq!(
+        follower.look().await,
+        Some(OpenBoard::Open {
+            url: url.clone(),
             person: ada()
         })
     );

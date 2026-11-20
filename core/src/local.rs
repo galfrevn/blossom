@@ -35,6 +35,12 @@ pub struct TokenFolderSnapshot {
     files_with_their_write_times: Vec<(PathBuf, Option<SystemTime>)>,
 }
 
+impl TokenFolderSnapshot {
+    pub fn has_no_files(&self) -> bool {
+        self.files_with_their_write_times.is_empty()
+    }
+}
+
 pub fn snapshot_token_folder(token_folder: &Path) -> TokenFolderSnapshot {
     let Ok(entries) = fs::read_dir(token_folder) else {
         return TokenFolderSnapshot {

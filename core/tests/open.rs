@@ -4,7 +4,8 @@ use blossom::contract::{OpenBoard, Person};
 use blossom::find_open_board;
 use support::{FakeBoard, answer_discovery_naming, answer_me, start_fake_board, write_token_file};
 use tempfile::TempDir;
-use wiremock::MockServer;
+use wiremock::matchers::method;
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn ada() -> Person {
     Person {
@@ -204,4 +205,32 @@ async fn start_board_whose_discovery_names(
     answer_discovery_naming(&server, other_url).await;
     answer_me(&server, token, handle, name).await;
     FakeBoard { server, url }
+}
+
+#[tokio::test]
+async fn a_redirect_is_never_followed_to_another_address() {
+    let elsewhere = MockServer::start().await;
+    let redirecting_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(307)
+                .insert_header("location", format!("{}/api/board", elsewhere.uri())),
+        )
+        .mount(&redirecting_server)
+        .await;
+    let redirecting_url = format!("{}/api/board", redirecting_server.uri());
+    let token_folder = TempDir::new().unwrap();
+    write_token_file(
+        token_folder.path(),
+        "board.json",
+        &redirecting_url,
+        "token-of-ada",
+        0,
+    )
+    .unwrap();
+
+    let open_board = find_open_board(token_folder.path()).await;
+
+    assert_eq!(open_board, OpenBoard::NoneRunning);
+    assert_eq!(elsewhere.received_requests().await.unwrap().len(), 0);
 }

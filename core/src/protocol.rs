@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use reqwest::Client;
+use reqwest::redirect::Policy;
 use serde::Deserialize;
 
 use crate::contract::Person;
@@ -23,6 +24,7 @@ pub fn client() -> Option<Client> {
     Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .no_proxy()
+        .redirect(Policy::none())
         .build()
         .ok()
 }
