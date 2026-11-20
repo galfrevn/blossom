@@ -53,7 +53,7 @@ Taken with the owner on 2026-11-20:
 Recommended in this plan, and recorded in ADR 0021 by ticket 01:
 
 - **The full suite runs on every push, with no selection.** Without a queue, selecting by diff would let a documentation commit show green above a commit that broke the core, and a cancelled run would leave that break unchecked. Running everything costs about a minute on documentation pushes, on free runners.
-- **Pull requests cancel superseded runs, and every push to `main` gets a run of its own.** On `main` a run per push says which commit broke it, and on free runners the runs go side by side. That needs a concurrency group per commit on `main`. A shared group with `cancel-in-progress` off, as in `813ea75`, still cancels a pending run when a newer one arrives, and makes the rest wait in line behind the run in progress.
+- **Pull requests cancel superseded runs, and every push to `main` gets a run of its own.** On `main` a run per push says which commit broke it, and on free runners the runs go side by side. That needs a concurrency group per commit on `main`, set in `82d7f2c`. A shared group with `cancel-in-progress` off, as `813ea75` had, still cancels a pending run when a newer one arrives, and makes the rest wait in line behind the run in progress.
 - **The pre-push hook is the gate before `main`.** It runs format, lint, the conventions check and types on what the push changes, in under 9 seconds. It is a hook and not a line in `CLAUDE.md`, because agents skip steps.
 - **Time budgets, enforced.** A push gets its result in under 2 minutes at the median and under 3 at the 95th percentile. Each job fails when a warm run exceeds its budget. A cold run is capped by the job's timeout. A cold run happens when a new Rust toolchain invalidates the cache, about once every six weeks, and it is reported as cold.
 - **Releases are free and unsigned until there is an Apple Developer account. This one waits on the owner.** A tag builds the disk image, signed ad hoc, and publishes it as a GitHub prerelease with checksums and a provenance attestation. It would amend the Distribution section of ADR 0012, which says distribution is not settled, so ADR 0012 stays as it is until the owner confirms. There is no updater, because ADR 0013 forbids update checks.
@@ -65,7 +65,7 @@ The brief this plan answers names default tools and techniques, and asks for a m
 | Default | Here | Reason |
 | --- | --- | --- |
 | Move to Blacksmith for waiting under 10 s | Not adopted | Measured waiting is 1–3 s. The owner chose free runners. |
-| Cancel a branch's run when a new commit lands | On for pull requests | Each push to `main` keeps its own run (ticket 01). |
+| Cancel a branch's run when a new commit lands | On for pull requests | Each push to `main` keeps its own run, since `82d7f2c`. |
 | Cache hits above 95 %, seeded from `main` | Ticket 01 | The biggest bucket. |
 | Cache `node_modules` | Not adopted | `bun install` takes 2–3 s from bun's own cache. |
 | Blobless clone | Not adopted | Nothing reads history, and the shallow checkout takes 1–2 s. |
