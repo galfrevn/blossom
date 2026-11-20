@@ -4,7 +4,7 @@ The order of work agreed on 2026-11-20, and changed the same day when scaffoldin
 
 ## 1. Scaffolding
 
-The skeleton that the spikes and the app are built on: the workspace, the conventions checked by machine, the desktop shell with the UI inside it, the contract between them, and CI with the first budgets. Its shape is in ADRs 0017 to 0020.
+The skeleton that the spikes and the app are built on: the workspace, the conventions checked by machine, the desktop shell with the UI inside it, the contract between them, and CI with the first budgets. Its shape is in ADRs 0017 to 0020. It was finished on 2026-11-20: tickets 01 to 05 under `.scratch/scaffold`.
 
 Its first behaviour is the first run of ADR 0012: the app finds a local board and opens it, or shows how to start one. How a local board can be found is in [../research/board.md](../research/board.md).
 
