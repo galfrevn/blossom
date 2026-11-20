@@ -4,6 +4,9 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+oxc_allocator = "0.133.0"
+oxc_parser = "0.133.0"
+oxc_span = "0.133.0"
 ra-ap-rustc_lexer = "0.185.0"
 
 [dev-dependencies]

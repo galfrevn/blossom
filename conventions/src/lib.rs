@@ -63,12 +63,12 @@ pub fn check(root: &Path, paths: &[PathBuf]) -> Result<Vec<Violation>, ReadError
                 path: misnamed_path,
             });
         }
-        if path.extension().is_some_and(|extension| extension == "rs") {
+        if let Some(language) = comments::language_of(path) {
             let source = fs::read_to_string(root.join(path)).map_err(|source| ReadError {
                 path: path.clone(),
                 source,
             })?;
-            for line in comments::lines_with_a_comment_in_rust(&source) {
+            for line in comments::lines_with_a_comment(&language, &source) {
                 violations.insert(Violation::Comment {
                     path: path.clone(),
                     line,

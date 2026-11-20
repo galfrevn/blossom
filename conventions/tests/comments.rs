@@ -80,6 +80,89 @@ fn files_that_are_not_rust_are_not_read() {
 }
 
 #[test]
+fn a_comment_in_typescript_is_reported_with_its_line() {
+    let tree = write_tree(&[(
+        "ui/board.ts",
+        "export const port = 4100;\n// the default port\nexport const host = \"127.0.0.1\";\n",
+    )])
+    .unwrap();
+
+    let violations = check(tree.directory.path(), &tree.paths).unwrap();
+
+    assert_eq!(
+        violations,
+        vec![Violation::Comment {
+            path: PathBuf::from("ui/board.ts"),
+            line: 2
+        }]
+    );
+}
+
+#[test]
+fn a_comment_inside_jsx_is_reported() {
+    let tree = write_tree(&[(
+        "ui/frame.tsx",
+        "export function Frame() {\n  return (\n    <main>\n      {/* the lens goes here */}\n    </main>\n  );\n}\n",
+    )])
+    .unwrap();
+
+    let violations = check(tree.directory.path(), &tree.paths).unwrap();
+
+    assert_eq!(
+        violations,
+        vec![Violation::Comment {
+            path: PathBuf::from("ui/frame.tsx"),
+            line: 4
+        }]
+    );
+}
+
+#[test]
+fn a_url_in_jsx_text_or_a_template_is_not_a_comment() {
+    let tree = write_tree(&[(
+        "ui/start.tsx",
+        "const path = `//${\"board\"}`;\nexport function Start() {\n  return <a href=\"https://vercel.com/board\">https://vercel.com/board {path}</a>;\n}\n",
+    )])
+    .unwrap();
+
+    let violations = check(tree.directory.path(), &tree.paths).unwrap();
+
+    assert_eq!(violations, vec![]);
+}
+
+#[test]
+fn a_comment_in_css_is_reported_with_its_line() {
+    let tree = write_tree(&[(
+        "ui/theme/tailwind.css",
+        "@import \"tailwindcss\";\n\n/* the identity's tokens */\n@import \"./tokens.css\";\n",
+    )])
+    .unwrap();
+
+    let violations = check(tree.directory.path(), &tree.paths).unwrap();
+
+    assert_eq!(
+        violations,
+        vec![Violation::Comment {
+            path: PathBuf::from("ui/theme/tailwind.css"),
+            line: 3
+        }]
+    );
+}
+
+#[test]
+fn slashes_inside_css_strings_are_not_comments() {
+    let tree = write_tree(&[(
+        "ui/theme/marks.css",
+        ".unread::before {\n  content: \"/* \\\" */\";\n}\n.mark {\n  background: url('https://example.com/a/*b.png');\n}\n",
+    )])
+    .unwrap();
+
+    let violations = check(tree.directory.path(), &tree.paths).unwrap();
+
+    assert_eq!(violations, vec![]);
+}
+
+#[test]
 fn a_rust_file_that_cannot_be_read_is_an_error_that_names_it() {
     let tree = write_tree(&[]).unwrap();
     let paths = vec![PathBuf::from("core/missing.rs")];

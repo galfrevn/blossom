@@ -1,26 +1,52 @@
-use ra_ap_rustc_lexer::{FrontmatterAllowed, TokenKind, strip_shebang, tokenize};
+mod css;
+mod rust;
+mod typescript;
 
-pub fn lines_with_a_comment_in_rust(source: &str) -> Vec<usize> {
-    let shebang_length = strip_shebang(source).unwrap_or(0);
-    let (shebang, body) = source
-        .split_at_checked(shebang_length)
-        .unwrap_or(("", source));
-    let mut line = 1 + shebang.matches('\n').count();
-    let mut remaining_text = body;
-    let mut comment_lines = Vec::new();
-    for token in tokenize(body, FrontmatterAllowed::Yes) {
-        let (token_text, text_after_token) = remaining_text
-            .split_at_checked(token.len as usize)
-            .unwrap_or((remaining_text, ""));
-        let token_is_a_comment = matches!(
-            token.kind,
-            TokenKind::LineComment { .. } | TokenKind::BlockComment { .. }
-        );
-        if token_is_a_comment {
-            comment_lines.push(line);
-        }
-        line += token_text.matches('\n').count();
-        remaining_text = text_after_token;
+use std::path::Path;
+
+use oxc_span::SourceType;
+
+pub enum Language {
+    Rust,
+    TypeScript(SourceType),
+    Css,
+}
+
+pub fn language_of(path: &Path) -> Option<Language> {
+    let extension = path.extension()?.to_str()?;
+    match extension {
+        "rs" => Some(Language::Rust),
+        "ts" | "tsx" => SourceType::from_path(path).ok().map(Language::TypeScript),
+        "css" => Some(Language::Css),
+        _ => None,
     }
-    comment_lines
+}
+
+pub fn lines_with_a_comment(language: &Language, source: &str) -> Vec<usize> {
+    match language {
+        Language::Rust => rust::lines_with_a_comment(source),
+        Language::TypeScript(source_type) => typescript::lines_with_a_comment(source, *source_type),
+        Language::Css => css::lines_with_a_comment(source),
+    }
+}
+
+struct LineStarts {
+    offsets: Vec<usize>,
+}
+
+impl LineStarts {
+    fn of(source: &str) -> LineStarts {
+        let offsets_after_each_newline = source
+            .match_indices('\n')
+            .map(|(newline_offset, _)| newline_offset + 1);
+        let offsets = std::iter::once(0)
+            .chain(offsets_after_each_newline)
+            .collect();
+        LineStarts { offsets }
+    }
+
+    fn line_at(&self, offset: usize) -> usize {
+        self.offsets
+            .partition_point(|line_start| *line_start <= offset)
+    }
 }
