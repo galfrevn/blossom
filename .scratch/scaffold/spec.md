@@ -63,7 +63,7 @@ Around that slice, the repository gets its toolchain: one command to develop, on
 
 - A Cargo workspace and a bun workspace share the repository root, laid out as ADR 0017 says: the `blossom` core library, the `desktop` Tauri binary, and the `ui` package.
 - The workspace also gets a third, development-only crate for the conventions check. It is never shipped and never a dependency of the product. ADR 0017 gains a line saying so.
-- Rust uses edition 2024, with `rust-version` pinned to the toolchain in use when the scaffold is built. There is no `rust-toolchain.toml`: the machine this starts on has no rustup.
+- Rust uses edition 2024 and the latest stable toolchain, installed through rustup. `rust-version` and the CI toolchain are pinned to it (1.100 on 2026-11-20) and raised together when a new stable ships. Crates follow their latest stable releases; Tauri stays on its 2.x line until 3.0 leaves alpha.
 - Lints are declared once for the whole workspace: `unwrap_used` and `expect_used` denied, with Clippy's own settings allowing both in tests; `unsafe_code` forbidden; warnings fail CI.
 - bun is the package manager and script runner, its version pinned in the root manifest. Vite, Vitest and Tauri's CLI run under it. The root holds the scripts and Tauri's CLI; `ui` is the only JavaScript package.
 - Three commands cover the work: develop, check and build. `check` runs exactly what CI runs.
