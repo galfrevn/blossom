@@ -33,7 +33,7 @@ documentation/
 | 0003 | Keep a local replica of the board, built from its event feed | accepted | [adr/architecture/replica.md](adr/architecture/replica.md) |
 | 0004 | Design for the fleet operator; the small case is the same product | accepted | [adr/product/audience.md](adr/product/audience.md) |
 | 0005 | One log, several lenses, with Attention first | accepted | [adr/product/lenses.md](adr/product/lenses.md) |
-| 0006 | Dark glass, dense, with pixel and dither accents | accepted | [adr/design/visual.md](adr/design/visual.md) |
+| 0006 | Dark, dense, with pixel and dither accents; glass postponed | accepted | [adr/design/visual.md](adr/design/visual.md) |
 | 0007 | React for the web UI, with state kept outside it | accepted | [adr/architecture/react.md](adr/architecture/react.md) |
 | 0008 | Apache-2.0 for the whole project | accepted | [adr/product/license.md](adr/product/license.md) |
 | 0009 | Weight and speed budgets that every change has to respect | accepted | [adr/architecture/budgets.md](adr/architecture/budgets.md) |
@@ -43,6 +43,7 @@ documentation/
 | 0013 | The app talks only to the board | accepted | [adr/product/privacy.md](adr/product/privacy.md) |
 | 0014 | The project is called Blossom | accepted | [adr/product/name.md](adr/product/name.md) |
 | 0015 | Code explains itself: no comments, one-word files, full-word names | accepted | [adr/architecture/conventions.md](adr/architecture/conventions.md) |
+| 0016 | Soft paper, warm ink, and a cherry blossom accent | accepted | [adr/design/identity.md](adr/design/identity.md) |
 
 "Proposed" means the decision was recommended and shown but not confirmed explicitly. Purely technical decisions in the core were delegated to Claude and are recorded as accepted for review; they say so in their first line.
 

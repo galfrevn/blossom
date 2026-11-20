@@ -4,11 +4,15 @@ status: accepted
 date: 2026-11-20
 ---
 
-# Dark glass, dense, with pixel and dither accents
+# Dark, dense, with pixel and dither accents
 
-The visual direction was settled over three concept iterations, against a screenshot of the T3 Code desktop app as the reference. The interface is dark translucent glass with blur, set in small dense type (13px base), with hairline dividers between everything, a dithered pixel header, and Geist, Geist Mono and Geist Pixel as the typefaces. It should read as a developer tool in the vein of Cursor, not as a consumer app.
+The visual direction was settled over three concept iterations, against a screenshot of the T3 Code desktop app as the reference. The interface is solid, not translucent, set in small dense type (13px base), with hairline dividers between everything, a dithered pixel header, and Geist, Geist Mono and Geist Pixel as the typefaces. It should read as a developer tool in the vein of Cursor, not as a consumer app.
 
 The direction is accepted with refinements pending. The verdict on the third iteration was: "There are things to improve but it is much better."
+
+## Glass, postponed
+
+The third iteration was translucent glass with blur, and this decision first said so. On 2026-11-20, before the app was scaffolded, glass was taken out: "Forget it, no glass. Let's leave it as an addition for later, once we have a working product." It comes back, if it does, after the first release works. There are two kinds to choose from then: the window's own vibrancy on macOS, which shows the desktop through the window and needs it to be transparent, and blur inside the page for floating panels such as the command palette.
 
 ## Considered options
 
@@ -19,5 +23,5 @@ The direction is accepted with refinements pending. The verdict on the third ite
 
 - Geist Pixel only reads as a pixel face from about 18px up. At 11 to 13px it looks almost like a regular sans, so it is used for titles, large figures and the wordmark.
 - Geist Pixel is not on Google Fonts. It has to be bundled with the app (SIL Open Font License, from the `geist` package on npm).
-- The product has both a light and a dark theme. The third iteration only has the dark one, so the light theme still has to be designed: glass and dither were drawn for dark and need their own treatment in light.
+- The product has both a light and a dark theme. The third iteration only has the dark one, so the light theme still has to be designed: dither was drawn for dark and needs its own treatment in light.
 - The improvements still wanted in the third iteration are polish. They do not reopen this direction, and they have not been listed yet.
