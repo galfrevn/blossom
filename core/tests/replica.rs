@@ -787,3 +787,124 @@ fn a_replica_made_before_task_events_were_kept_is_not_opened() {
 
     assert!(matches!(opened, Err(ReplicaError::AnotherSchemaVersion(0))));
 }
+
+struct StoredFacts {
+    root: Option<String>,
+    author: String,
+    plain_agent_reply: bool,
+}
+
+fn stored_facts_of(folder: &TempDir, id: &str) -> rusqlite::Result<StoredFacts> {
+    let connection = rusqlite::Connection::open(folder.path().join("board.sqlite"))?;
+    connection.query_row(
+        "SELECT re, author, plain_agent_reply FROM messages WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(StoredFacts {
+                root: row.get(0)?,
+                author: row.get(1)?,
+                plain_agent_reply: row.get(2)?,
+            })
+        },
+    )
+}
+
+fn reply_by(
+    author: &Value,
+    id: &str,
+    version: u64,
+    extra: &Value,
+) -> Result<MessageView, serde_json::Error> {
+    let mut board_view = json!({
+        "id": id, "channel": "fleet/www", "thread": "thread-of-1", "re": "1",
+        "createdAt": "2026-11-20T10:00:00.000Z", "version": version,
+        "text": "running the tests", "attachments": [], "author": author
+    });
+    if let (Some(fields), Some(extra_fields)) = (board_view.as_object_mut(), extra.as_object()) {
+        for (key, value) in extra_fields {
+            fields.insert(key.clone(), value.clone());
+        }
+    }
+    MessageView::parse(&board_view.to_string())
+}
+
+#[test]
+fn a_stored_message_keeps_its_root_its_author_and_whether_it_is_a_plain_agent_reply() {
+    let folder = TempDir::new().unwrap();
+    let mut replica = open_replica_in(&folder).unwrap();
+    let agent = json!({ "kind": "agent", "handle": "ada/claude", "name": "claude" });
+    let person = json!({ "kind": "person", "handle": "ada", "name": "Ada Lovelace" });
+    let attachment = json!({ "id": "a1", "name": "log.txt", "type": "text/plain", "size": 12 });
+    replica
+        .apply(&views(vec![
+            view("1", 1, "fix the flaky test").unwrap(),
+            reply_by(&agent, "2", 1, &json!({})).unwrap(),
+            reply_by(&person, "3", 1, &json!({})).unwrap(),
+            reply_by(
+                &agent,
+                "4",
+                1,
+                &json!({ "text": "over to @[local:user:ada]" }),
+            )
+            .unwrap(),
+            reply_by(&agent, "5", 1, &json!({ "attachments": [attachment] })).unwrap(),
+            reply_by(
+                &Value::Null,
+                "6",
+                1,
+                &json!({ "by": { "actor": "local:user:ada+claude" } }),
+            )
+            .unwrap(),
+            reply_by(
+                &agent,
+                "7",
+                1,
+                &json!({ "by": { "actor": "local:user:ada+codex" } }),
+            )
+            .unwrap(),
+        ]))
+        .unwrap();
+
+    let root = stored_facts_of(&folder, "1").unwrap();
+    assert_eq!(root.root, None);
+    assert!(!root.plain_agent_reply);
+    let plain = stored_facts_of(&folder, "2").unwrap();
+    assert_eq!(plain.root.as_deref(), Some("1"));
+    assert_eq!(plain.author, "ada/claude");
+    assert!(plain.plain_agent_reply);
+    assert!(!stored_facts_of(&folder, "3").unwrap().plain_agent_reply);
+    assert!(!stored_facts_of(&folder, "4").unwrap().plain_agent_reply);
+    assert!(!stored_facts_of(&folder, "5").unwrap().plain_agent_reply);
+    assert_eq!(
+        stored_facts_of(&folder, "6").unwrap().author,
+        "local:user:ada+claude"
+    );
+    assert_eq!(
+        stored_facts_of(&folder, "7").unwrap().author,
+        "local:user:ada+codex"
+    );
+}
+
+#[test]
+fn an_edit_that_adds_a_mention_makes_a_reply_no_longer_plain() {
+    let folder = TempDir::new().unwrap();
+    let mut replica = open_replica_in(&folder).unwrap();
+    let agent = json!({ "kind": "agent", "handle": "ada/claude", "name": "claude" });
+    replica
+        .apply(&views(vec![reply_by(&agent, "2", 1, &json!({})).unwrap()]))
+        .unwrap();
+
+    replica
+        .apply(&views(vec![
+            reply_by(
+                &agent,
+                "2",
+                2,
+                &json!({ "text": "over to @[local:user:ada]" }),
+            )
+            .unwrap(),
+        ]))
+        .unwrap();
+
+    assert!(!stored_facts_of(&folder, "2").unwrap().plain_agent_reply);
+}

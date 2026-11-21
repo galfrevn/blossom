@@ -1,21 +1,18 @@
 import type { FlowRow } from "../core/contract";
 import { dictionary } from "../dictionary";
+import { FoldLine } from "./fold";
+import { textOf } from "./text";
 
-function textOf(row: FlowRow): string {
-  if (row.deleted) {
-    return dictionary.flow.deleted;
-  }
-  return row.text;
-}
-
-function MinuteDivider({ row, time }: { row: FlowRow; time: string }) {
+function MinuteDivider({ row }: { row: FlowRow }) {
   if (!row.firstOfItsMinute) {
     return null;
   }
   return (
-    <div className="col-span-2 flex items-center gap-2.5 pt-2 pb-1 font-mono text-[10.5px] text-ink-3 after:h-px after:flex-1 after:bg-line">
-      <time dateTime={row.createdAt}>{time}</time>
-    </div>
+    <h3 className="flex items-center gap-2.5 px-5 pt-3 pb-1 font-mono font-normal text-[10.5px] text-ink-3 after:h-px after:flex-1 after:bg-line">
+      <time dateTime={row.createdAt}>
+        {dictionary.flow.time(row.createdAt)}
+      </time>
+    </h3>
   );
 }
 
@@ -41,14 +38,13 @@ function Edited({ row }: { row: FlowRow }) {
   );
 }
 
-export function FlowLine({ row }: { row: FlowRow }) {
+function MessageLine({ row }: { row: FlowRow }) {
   const time = dictionary.flow.time(row.createdAt);
   return (
     <article
       data-message={row.id}
       className="grid grid-cols-[44px_minmax(0,1fr)] gap-x-3 px-5 py-[5px] hover:bg-raised"
     >
-      <MinuteDivider row={row} time={time} />
       <time
         dateTime={row.createdAt}
         className="font-mono text-[11px] text-ink-3 leading-[1.8]"
@@ -67,5 +63,21 @@ export function FlowLine({ row }: { row: FlowRow }) {
         </p>
       </div>
     </article>
+  );
+}
+
+function LineOf({ row }: { row: FlowRow }) {
+  if (row.fold !== null) {
+    return <FoldLine row={row} fold={row.fold} />;
+  }
+  return <MessageLine row={row} />;
+}
+
+export function FlowLine({ row }: { row: FlowRow }) {
+  return (
+    <>
+      <MinuteDivider row={row} />
+      <LineOf row={row} />
+    </>
   );
 }

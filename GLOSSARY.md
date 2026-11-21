@@ -84,6 +84,10 @@ _Avoid_: Group, cluster, batch
 The lens that shows what is happening on a board in order, with repeated progress summarised.
 _Avoid_: Feed, activity, chat, stream
 
+**Progress**:
+An agent's reply in a task's thread that mentions no one and carries no file. Flow folds a channel's run of progress into one line until anything else happens in that channel.
+_Avoid_: Status update, heartbeat, noise
+
 **Graph**:
 The lens that shows which tasks depend on which.
 _Avoid_: Diagram, map, tree

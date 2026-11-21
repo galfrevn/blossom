@@ -51,6 +51,12 @@ export class RowHeights {
     this.measured.fill(0);
   }
 
+  forgetMeasurementOf(index: number): void {
+    if (index >= 0 && index < this.count) {
+      this.measured[index] = 0;
+    }
+  }
+
   set(index: number, height: number): number {
     if (index < 0 || index >= this.count) {
       return 0;

@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import type { FlowChange, FlowWindow } from "../core/contract";
 import { RowHeights } from "./heights";
+import type { WatchedRows } from "./watch";
 import { FlowWindows } from "./windows";
 
 export const ESTIMATED_ROW_HEIGHT = 46;
@@ -17,6 +18,7 @@ export type ListState = {
   viewportHeight: number;
   keepsToTheBottom: boolean;
   totalWhenItLeftTheBottom: number;
+  watchedRows: WatchedRows | null;
 };
 
 export function isAtTheBottom(scroller: HTMLElement): boolean {
@@ -75,6 +77,7 @@ export function useListState(
       viewportHeight: 0,
       keepsToTheBottom: true,
       totalWhenItLeftTheBottom: 0,
+      watchedRows: null,
     };
   }
   return stateRef.current;

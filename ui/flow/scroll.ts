@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect } from "react";
 import { isAtTheBottom, type ListState } from "./state";
+import { WatchedRows } from "./watch";
 
 function heightStillToMeasure(
   element: HTMLElement,
@@ -79,18 +80,36 @@ export function useScrollFollowing(
     state.viewportHeight = scroller.clientHeight;
     scroller.addEventListener("scroll", onScroll, { passive: true });
     let width = scroller.clientWidth;
-    const resizing = new ResizeObserver(() => {
-      if (scroller.clientWidth === width) {
+    const resizing = new ResizeObserver((entries) => {
+      if (scroller.clientWidth !== width) {
+        width = scroller.clientWidth;
+        state.heights.forgetMeasurements();
+        redraw();
         return;
       }
-      width = scroller.clientWidth;
-      state.heights.forgetMeasurements();
-      redraw();
+      let rowChanged = false;
+      for (const entry of entries) {
+        const index = Number((entry.target as HTMLElement).dataset.index);
+        const height = (entry.target as HTMLElement).offsetHeight;
+        const changedItsHeight =
+          entry.target !== scroller &&
+          height > 0 &&
+          height !== state.heights.heightOf(index);
+        if (changedItsHeight) {
+          state.heights.forgetMeasurementOf(index);
+          rowChanged = true;
+        }
+      }
+      if (rowChanged) {
+        redraw();
+      }
     });
     resizing.observe(scroller);
+    state.watchedRows = new WatchedRows(resizing);
     return () => {
       cancelAnimationFrame(frame);
       resizing.disconnect();
+      state.watchedRows = null;
       scroller.removeEventListener("scroll", onScroll);
     };
   }, [scrollerRef, state, redraw]);
@@ -113,6 +132,7 @@ export function useLayoutAfterDrawing(
       return;
     }
     const { shiftAbove, changed } = measure(scroller, state);
+    state.watchedRows?.follow(scroller.querySelectorAll("[data-loaded]"));
     const { heights } = state;
     content.style.height = `${heights.total()}px`;
     place(scroller, state);

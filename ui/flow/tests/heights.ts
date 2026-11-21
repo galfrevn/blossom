@@ -76,3 +76,14 @@ test("a row is measured once, until the measurements are forgotten", () => {
   expect(heights.isMeasured(THIRD)).toBe(false);
   expect(heights.heightOf(THIRD)).toBe(MEASURED_TALLER);
 });
+
+test("one row's measurement can be forgotten, so it is measured again", () => {
+  const heights = new RowHeights(FIVE_ROWS, ESTIMATE);
+  heights.set(SECOND, MEASURED_TALLER);
+  heights.set(THIRD, MEASURED_TALLER);
+
+  heights.forgetMeasurementOf(THIRD);
+
+  expect(heights.isMeasured(SECOND)).toBe(true);
+  expect(heights.isMeasured(THIRD)).toBe(false);
+});

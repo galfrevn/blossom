@@ -30,6 +30,14 @@ pub(crate) struct ActorDetails {
 }
 
 impl ActorDetails {
+    pub(crate) fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    pub(crate) fn handle(&self) -> &str {
+        &self.handle
+    }
+
     pub(crate) fn of_actor(self, id: String) -> Actor {
         Actor {
             id,

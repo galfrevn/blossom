@@ -59,6 +59,7 @@ function messageInFlow(overrides: Partial<FlowRow> & { id: string }): FlowRow {
     edited: false,
     deleted: false,
     firstOfItsMinute: false,
+    fold: null,
     ...overrides,
   };
 }
@@ -97,7 +98,7 @@ test("Flow lists the messages oldest first", async () => {
   ).toEqual(["1", "2", "3"]);
 });
 
-test("a message that starts a minute shows that minute above it", async () => {
+test("a message that starts a minute has that minute's divider above it", async () => {
   renderFlowOf([
     messageInFlow({
       id: "1",
@@ -111,11 +112,12 @@ test("a message that starts a minute shows that minute above it", async () => {
     }),
   ]);
 
-  const [first, second] = await flowList().findAllByRole("article");
-  const minute = dictionary.flow.time("2026-11-21T10:00:05.000Z");
+  await flowList().findAllByRole("article");
+  const dividers = flowList().getAllByRole("heading", { level: 3 });
 
-  expect(within(first as HTMLElement).getAllByText(minute)).toHaveLength(2);
-  expect(within(second as HTMLElement).getAllByText(minute)).toHaveLength(1);
+  expect(dividers.map((divider) => divider.textContent)).toEqual([
+    dictionary.flow.time("2026-11-21T10:00:05.000Z"),
+  ]);
 });
 
 test("a person's own message names no one it acts for", async () => {

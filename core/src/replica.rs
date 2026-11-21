@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime};
 
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::Deserialize;
+use serde::de::IgnoredAny;
 use serde_json::Value;
 
 use crate::access::BoardAccess;
@@ -94,6 +95,9 @@ pub struct MessageView {
     json: String,
     task: Option<RootTask>,
     author: Option<Actor>,
+    re: Option<String>,
+    author_actor: String,
+    plain_agent_reply: bool,
 }
 
 #[derive(Deserialize)]
@@ -107,11 +111,43 @@ struct MessageViewKeys {
     task: Option<RootTask>,
     by: Option<AuthorKeys>,
     author: Option<ActorDetails>,
+    re: Option<String>,
+    text: Option<String>,
+    attachments: Option<Vec<IgnoredAny>>,
+}
+
+const MENTION_START: &str = "@[";
+
+impl MessageViewKeys {
+    fn author_actor(&self) -> String {
+        let actor = self.by.as_ref().map(|by| by.actor.as_str());
+        let handle = self.author.as_ref().map(ActorDetails::handle);
+        actor.or(handle).unwrap_or_default().to_owned()
+    }
+
+    fn is_a_plain_agent_reply(&self) -> bool {
+        let is_a_reply = self.re.is_some();
+        let written_by_an_agent = self
+            .author
+            .as_ref()
+            .is_some_and(|author| author.kind() == "agent");
+        let mentions_someone = self
+            .text
+            .as_deref()
+            .is_some_and(|text| text.contains(MENTION_START));
+        let carries_files = self
+            .attachments
+            .as_ref()
+            .is_some_and(|attachments| !attachments.is_empty());
+        is_a_reply && written_by_an_agent && !mentions_someone && !carries_files
+    }
 }
 
 impl MessageView {
     pub fn parse(json: &str) -> Result<MessageView, serde_json::Error> {
         let keys: MessageViewKeys = serde_json::from_str(json)?;
+        let author_actor = keys.author_actor();
+        let plain_agent_reply = keys.is_a_plain_agent_reply();
         let author = match (keys.by, keys.author) {
             (Some(by), Some(details)) => Some(details.of_actor(by.actor)),
             _ => None,
@@ -125,6 +161,9 @@ impl MessageView {
             json: json.to_owned(),
             task: keys.task,
             author,
+            re: keys.re,
+            author_actor,
+            plain_agent_reply,
         })
     }
 
@@ -173,7 +212,7 @@ impl From<rusqlite::Error> for ReplicaError {
 
 const WAIT_FOR_ANOTHER_CONNECTION: Duration = Duration::from_secs(2);
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 const SCHEMA: &str = "
     CREATE TABLE messages (
@@ -182,13 +221,17 @@ const SCHEMA: &str = "
         thread TEXT NOT NULL,
         created_at TEXT NOT NULL,
         version INTEGER NOT NULL,
-        view TEXT NOT NULL
+        view TEXT NOT NULL,
+        re TEXT,
+        author TEXT NOT NULL,
+        plain_agent_reply INTEGER NOT NULL
     ) WITHOUT ROWID;
     CREATE TABLE feed (
         only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
         cursor TEXT NOT NULL
     );
-    CREATE INDEX messages_by_time ON messages (created_at, id);
+    CREATE INDEX messages_by_time
+        ON messages (created_at, id, channel, author, plain_agent_reply, re);
     CREATE TABLE arrivals (
         sequence INTEGER PRIMARY KEY,
         id TEXT NOT NULL
@@ -405,13 +448,16 @@ fn store_batch(transaction: &Transaction<'_>, batch: &Batch) -> Result<u32, Repl
 
 fn store_views(transaction: &Transaction<'_>, views: &[MessageView]) -> Result<u32, ReplicaError> {
     let mut store_new_view = transaction.prepare_cached(
-        "INSERT INTO messages (id, channel, thread, created_at, version, view)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "INSERT INTO messages (
+             id, channel, thread, created_at, version, view, re, author, plain_agent_reply
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT (id) DO NOTHING",
     )?;
     let mut replace_with_newer_view = transaction.prepare_cached(
         "UPDATE messages
-         SET channel = ?2, thread = ?3, created_at = ?4, version = ?5, view = ?6
+         SET channel = ?2, thread = ?3, created_at = ?4, version = ?5, view = ?6,
+             re = ?7, author = ?8, plain_agent_reply = ?9
          WHERE id = ?1 AND version < ?5",
     )?;
     let mut new_messages = 0;
@@ -422,7 +468,10 @@ fn store_views(transaction: &Transaction<'_>, views: &[MessageView]) -> Result<u
             view.thread,
             view.created_at,
             view.version,
-            view.json
+            view.json,
+            view.re,
+            view.author_actor,
+            view.plain_agent_reply
         ];
         let stored_as_new = store_new_view.execute(fields)? == 1;
         if stored_as_new {

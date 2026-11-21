@@ -9,6 +9,13 @@ function count(value: number): string {
   return countFormat.format(value);
 }
 
+function plural(value: number, one: string, many: string): string {
+  if (value === 1) {
+    return `1 ${one}`;
+  }
+  return `${count(value)} ${many}`;
+}
+
 export const english = {
   start: {
     title: "No board running",
@@ -36,7 +43,8 @@ export const english = {
     widenMark: "×",
     flow: {
       title: "Flow",
-      description: "Everything on the board, in order.",
+      description:
+        "Everything on the board, in order. Repeated progress folds into one line per channel; open a line to read it.",
     },
   },
   flow: {
@@ -45,6 +53,16 @@ export const english = {
     time: (createdAt: string) => clockTime.format(new Date(createdAt)),
     deleted: "Deleted",
     edited: "edited",
+    foldCount: (updates: number, agents: number) => {
+      const updatesText = plural(
+        updates,
+        "progress update",
+        "progress updates",
+      );
+      const agentsText = plural(agents, "agent", "agents");
+      return `${updatesText} from ${agentsText}`;
+    },
+    latest: (text: string) => `latest: ${text}`,
     newBelow: (waiting: number) => {
       if (waiting === 1) {
         return "1 new message";

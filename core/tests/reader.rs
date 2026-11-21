@@ -355,3 +355,316 @@ fn a_narrowed_flow_follows_new_messages_in_its_channel() {
     );
     assert_eq!(reader.flow_window_in(None, 0, 10).unwrap().total, 3);
 }
+
+fn root_task_in(channel: &str, id: &str, second: u32) -> Result<MessageView, serde_json::Error> {
+    let board_view = json!({
+        "id": id, "channel": channel, "thread": format!("thread-of-{id}"), "re": null,
+        "createdAt": format!("2026-11-21T11:00:{second:02}.000Z"), "version": 1,
+        "text": "fix the flaky test",
+        "author": { "kind": "person", "handle": "ada", "name": "Ada Lovelace" },
+        "task": {
+            "state": "claimed", "owner": "local:user:ada", "by": "local:user:ada", "for": null,
+            "needs": [], "epoch": 1, "claim": null, "blocked": null, "result": null, "reason": null
+        }
+    });
+    MessageView::parse(&board_view.to_string())
+}
+
+struct Reply<'text> {
+    id: &'text str,
+    root: &'text str,
+    channel: &'text str,
+    second: u32,
+    agent: &'text str,
+    text: &'text str,
+}
+
+fn reply(reply: &Reply<'_>) -> Result<MessageView, serde_json::Error> {
+    let author = if reply.agent.is_empty() {
+        json!({ "kind": "person", "handle": "ada", "name": "Ada Lovelace" })
+    } else {
+        json!({ "kind": "agent", "handle": format!("ada/{}", reply.agent), "name": reply.agent, "via": { "name": "ada", "environment": null } })
+    };
+    let board_view = json!({
+        "id": reply.id, "channel": reply.channel, "thread": format!("thread-of-{}", reply.root),
+        "re": reply.root, "createdAt": format!("2026-11-21T11:00:{:02}.000Z", reply.second),
+        "version": 1, "text": reply.text, "attachments": [], "author": author
+    });
+    MessageView::parse(&board_view.to_string())
+}
+
+fn root_in(channel: &str, id: &str, second: u32) -> Result<MessageView, serde_json::Error> {
+    let board_view = json!({
+        "id": id, "channel": channel, "thread": format!("thread-of-{id}"), "re": null,
+        "createdAt": format!("2026-11-21T11:00:{second:02}.000Z"), "version": 1, "text": "lunch?",
+        "author": { "kind": "person", "handle": "ada", "name": "Ada Lovelace" }
+    });
+    MessageView::parse(&board_view.to_string())
+}
+
+fn progress(
+    id: &str,
+    root: &str,
+    channel: &str,
+    second: u32,
+    agent: &str,
+) -> Result<MessageView, serde_json::Error> {
+    reply(&Reply {
+        id,
+        root,
+        channel,
+        second,
+        agent,
+        text: "still running the tests",
+    })
+}
+
+fn shape_of(window: &blossom::contract::FlowWindow) -> Vec<String> {
+    window
+        .rows
+        .iter()
+        .map(|row| match &row.fold {
+            Some(fold) => format!("fold {} of {} in {}", fold.count, fold.agents, row.channel),
+            None => row.id.clone(),
+        })
+        .collect()
+}
+
+#[test]
+fn agents_progress_in_a_tasks_thread_folds_into_one_line_per_channel() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            root_task_in("fleet/www", "10", 0).unwrap(),
+            progress("11", "10", "fleet/www", 1, "claude").unwrap(),
+            progress("12", "10", "fleet/www", 2, "codex").unwrap(),
+            progress("13", "10", "fleet/www", 3, "claude").unwrap(),
+        ]))
+        .unwrap();
+
+    let window = ReplicaReader::open(&file)
+        .unwrap()
+        .flow_window_in(None, 0, 10)
+        .unwrap();
+
+    assert_eq!(shape_of(&window), vec!["10", "fold 3 of 2 in fleet/www"]);
+    let fold = window.rows[1].fold.as_ref().unwrap();
+    let recent: Vec<&str> = fold.recent.iter().map(|row| row.id.as_str()).collect();
+    assert_eq!(recent, vec!["11", "12", "13"]);
+    assert_eq!(window.rows[1].id, "13");
+}
+
+#[test]
+fn anything_else_in_the_channel_closes_its_fold() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            root_task_in("fleet/www", "10", 0).unwrap(),
+            progress("11", "10", "fleet/www", 1, "claude").unwrap(),
+            progress("12", "10", "fleet/www", 2, "claude").unwrap(),
+            reply(&Reply {
+                id: "13",
+                root: "10",
+                channel: "fleet/www",
+                second: 3,
+                agent: "",
+                text: "looks good",
+            })
+            .unwrap(),
+            progress("14", "10", "fleet/www", 4, "claude").unwrap(),
+        ]))
+        .unwrap();
+
+    let window = ReplicaReader::open(&file)
+        .unwrap()
+        .flow_window_in(None, 0, 10)
+        .unwrap();
+
+    assert_eq!(
+        shape_of(&window),
+        vec![
+            "10",
+            "fold 2 of 1 in fleet/www",
+            "13",
+            "fold 1 of 1 in fleet/www"
+        ]
+    );
+}
+
+#[test]
+fn a_fold_sits_where_its_latest_message_sits_and_other_channels_do_not_close_it() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            root_task_in("fleet/www", "10", 0).unwrap(),
+            progress("11", "10", "fleet/www", 1, "claude").unwrap(),
+            root_in("general", "12", 30).unwrap(),
+            progress("13", "10", "fleet/www", 59, "claude").unwrap(),
+        ]))
+        .unwrap();
+
+    let window = ReplicaReader::open(&file)
+        .unwrap()
+        .flow_window_in(None, 0, 10)
+        .unwrap();
+
+    assert_eq!(
+        shape_of(&window),
+        vec!["10", "12", "fold 2 of 1 in fleet/www"]
+    );
+}
+
+#[test]
+fn mentions_files_people_and_threads_that_are_not_tasks_are_never_progress() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    let mut with_a_file = reply(&Reply {
+        id: "13",
+        root: "10",
+        channel: "fleet/www",
+        second: 3,
+        agent: "claude",
+        text: "the log",
+    })
+    .unwrap();
+    let with_a_file_json = json!({
+        "id": "13", "channel": "fleet/www", "thread": "thread-of-10", "re": "10",
+        "createdAt": "2026-11-21T11:00:03.000Z", "version": 1, "text": "the log",
+        "attachments": [{ "id": "a1", "name": "log.txt", "type": "text/plain", "size": 12 }],
+        "author": { "kind": "agent", "handle": "ada/claude", "name": "claude", "via": { "name": "ada", "environment": null } }
+    });
+    with_a_file = MessageView::parse(&with_a_file_json.to_string()).unwrap_or(with_a_file);
+    replica
+        .apply(&Batch::from_views(vec![
+            root_task_in("fleet/www", "10", 0).unwrap(),
+            reply(&Reply {
+                id: "11",
+                root: "10",
+                channel: "fleet/www",
+                second: 1,
+                agent: "claude",
+                text: "over to @[local:user:ada]",
+            })
+            .unwrap(),
+            reply(&Reply {
+                id: "12",
+                root: "10",
+                channel: "fleet/www",
+                second: 2,
+                agent: "",
+                text: "thanks",
+            })
+            .unwrap(),
+            with_a_file,
+            view_in_at("fleet/api", "20", 0).unwrap(),
+            progress("21", "20", "fleet/api", 4, "claude").unwrap(),
+        ]))
+        .unwrap();
+
+    let window = ReplicaReader::open(&file)
+        .unwrap()
+        .flow_window_in(None, 0, 10)
+        .unwrap();
+
+    assert_eq!(shape_of(&window), vec!["20", "10", "11", "12", "13", "21"]);
+}
+
+#[test]
+fn a_growing_fold_moves_to_the_bottom() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            root_task_in("fleet/www", "10", 0).unwrap(),
+            progress("11", "10", "fleet/www", 1, "claude").unwrap(),
+            root_in("general", "12", 30).unwrap(),
+        ]))
+        .unwrap();
+    let mut reader = ReplicaReader::open(&file).unwrap();
+    assert_eq!(
+        shape_of(&reader.flow_window_in(None, 0, 10).unwrap()),
+        vec!["10", "fold 1 of 1 in fleet/www", "12"]
+    );
+
+    replica
+        .apply(&Batch::from_views(vec![
+            progress("13", "10", "fleet/www", 59, "codex").unwrap(),
+        ]))
+        .unwrap();
+    reader.catch_up().unwrap();
+
+    assert_eq!(
+        shape_of(&reader.flow_window_in(None, 0, 10).unwrap()),
+        vec!["10", "12", "fold 2 of 2 in fleet/www"]
+    );
+}
+
+#[test]
+fn a_fold_keeps_only_its_last_eight_messages_to_show() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    let mut views = vec![root_task_in("fleet/www", "10", 0).unwrap()];
+    for second in 1..=12 {
+        let id = format!("1{second:02}");
+        views.push(progress(&id, "10", "fleet/www", second, "claude").unwrap());
+    }
+    replica.apply(&Batch::from_views(views)).unwrap();
+
+    let window = ReplicaReader::open(&file)
+        .unwrap()
+        .flow_window_in(None, 0, 10)
+        .unwrap();
+
+    let fold = window.rows[1].fold.as_ref().unwrap();
+    assert_eq!(fold.count, 12);
+    let recent: Vec<&str> = fold.recent.iter().map(|row| row.id.as_str()).collect();
+    assert_eq!(
+        recent,
+        vec!["105", "106", "107", "108", "109", "110", "111", "112"]
+    );
+}
+
+#[test]
+fn the_flow_s_order_is_read_from_its_index_alone() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            root_task_in("fleet/www", "10", 0).unwrap(),
+        ]))
+        .unwrap();
+    let connection = rusqlite::Connection::open(&file).unwrap();
+    let mut statement = connection
+        .prepare(
+            "EXPLAIN QUERY PLAN
+             SELECT created_at, id, channel, author,
+                    plain_agent_reply AND EXISTS (SELECT 1 FROM tasks WHERE tasks.id = re)
+             FROM messages ORDER BY created_at, id",
+        )
+        .unwrap();
+    let plan: Vec<String> = statement
+        .query_map([], |row| row.get(3))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+
+    assert!(
+        plan.iter()
+            .any(|step| step.contains("COVERING INDEX messages_by_time")),
+        "{plan:?}"
+    );
+    assert!(
+        !plan.iter().any(|step| step.contains("TEMP B-TREE")),
+        "{plan:?}"
+    );
+}

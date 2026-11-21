@@ -23,6 +23,7 @@ function rowNumbered(index: number, text: string): FlowRow {
     edited: false,
     deleted: false,
     firstOfItsMinute: false,
+    fold: null,
   };
 }
 

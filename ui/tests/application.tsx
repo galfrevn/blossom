@@ -4,6 +4,7 @@ import { Application } from "../application";
 import type { OpenBoard, ReplicaState } from "../core/contract";
 import { createFakeCore } from "../core/fake";
 import { createStore } from "../core/store";
+import { dictionary } from "../dictionary";
 
 afterEach(cleanup);
 
@@ -184,7 +185,7 @@ test("the lens says what it shows", () => {
   renderApplicationWhileTheCoreSays({ openBoard: boardOfAda, channels: [] });
 
   expect(screen.getByRole("heading", { name: "Flow" })).toBeDefined();
-  expect(screen.getByText("Everything on the board, in order.")).toBeDefined();
+  expect(screen.getByText(dictionary.lenses.flow.description)).toBeDefined();
 });
 
 test("with no board running, there is no sidebar", () => {

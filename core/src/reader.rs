@@ -1,68 +1,61 @@
+mod lines;
+mod numbers;
+
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 
-use rusqlite::{CachedStatement, Connection, OpenFlags, params};
+use rusqlite::types::Type;
+use rusqlite::{CachedStatement, Connection, OpenFlags, Row, params};
 
-use crate::contract::{FlowRow, FlowWindow};
+use crate::contract::{FlowFold, FlowRow, FlowWindow};
 use crate::replica::ReplicaError;
+use lines::{Line, OrderedMessage, lines_of};
+use numbers::Numbers;
 
-const MINUTE_PREFIX_LENGTH: usize = "2026-11-21T10:00".len();
+const MESSAGES_A_FOLD_SHOWS: usize = 8;
 
-struct OrderedMessage {
-    created_at: Box<str>,
-    id: Box<str>,
-    channel: u32,
-}
+const ORDERED_MESSAGE_COLUMNS: &str = "messages.created_at,
+     messages.id,
+     messages.channel,
+     messages.author,
+     messages.plain_agent_reply
+         AND EXISTS (SELECT 1 FROM tasks WHERE tasks.id = messages.re)";
 
 struct Narrowed {
     channel: String,
-    flow_length: usize,
-    positions: Vec<usize>,
+    revision: u64,
+    lines: Vec<usize>,
 }
 
-#[derive(Default)]
-struct ChannelNumbers {
-    names: Vec<Box<str>>,
-    numbers: HashMap<Box<str>, u32>,
+fn text_at<'row>(row: &'row Row<'_>, column: usize) -> rusqlite::Result<&'row str> {
+    row.get_ref(column)?.as_str().map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(column, Type::Text, Box::new(error))
+    })
 }
 
-impl ChannelNumbers {
-    fn number_of(&mut self, channel: &str) -> u32 {
-        if let Some(number) = self.numbers.get(channel) {
-            return *number;
-        }
-        let number = u32::try_from(self.names.len()).unwrap_or(u32::MAX);
-        self.names.push(channel.into());
-        self.numbers.insert(channel.into(), number);
-        number
-    }
-
-    fn within(&self, channel: &str) -> Vec<bool> {
-        let subtree = format!("{channel}/");
-        self.names
-            .iter()
-            .map(|name| &**name == channel || name.starts_with(&subtree))
-            .collect()
-    }
-}
-
-impl OrderedMessage {
-    fn minute(&self) -> &str {
-        self.created_at
-            .get(..MINUTE_PREFIX_LENGTH)
-            .unwrap_or(&self.created_at)
-    }
-
-    fn comes_before(&self, created_at: &str, id: &str) -> bool {
-        (&*self.created_at, &*self.id) < (created_at, id)
-    }
+fn ordered_message(
+    row: &Row<'_>,
+    first_column: usize,
+    channels: &mut Numbers,
+    authors: &mut Numbers,
+) -> rusqlite::Result<OrderedMessage> {
+    Ok(OrderedMessage {
+        created_at: text_at(row, first_column)?.into(),
+        id: text_at(row, first_column + 1)?.into(),
+        channel: channels.number_of(text_at(row, first_column + 2)?),
+        author: authors.number_of(text_at(row, first_column + 3)?),
+        progress: row.get(first_column + 4)?,
+    })
 }
 
 pub struct ReplicaReader {
     connection: Connection,
     flow: Vec<OrderedMessage>,
-    channel_numbers: ChannelNumbers,
+    lines: Vec<Line>,
+    revision: u64,
+    channels: Numbers,
+    authors: Numbers,
     narrowed: RefCell<Option<Narrowed>>,
     last_arrival: i64,
 }
@@ -79,32 +72,27 @@ impl ReplicaReader {
             [],
             |row| row.get(0),
         )?;
+        let mut channels = Numbers::default();
+        let mut authors = Numbers::default();
         let mut flow = Vec::new();
-        let mut channel_numbers = ChannelNumbers::default();
         {
-            let mut statement = snapshot
-                .prepare("SELECT created_at, id, channel FROM messages ORDER BY created_at, id")?;
-            let rows = statement.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?;
-            for row in rows {
-                let (created_at, id, channel) = row?;
-                flow.push(OrderedMessage {
-                    created_at: created_at.into_boxed_str(),
-                    id: id.into_boxed_str(),
-                    channel: channel_numbers.number_of(&channel),
-                });
+            let mut statement = snapshot.prepare(&format!(
+                "SELECT {ORDERED_MESSAGE_COLUMNS} FROM messages ORDER BY created_at, id"
+            ))?;
+            let mut rows = statement.query([])?;
+            while let Some(row) = rows.next()? {
+                flow.push(ordered_message(row, 0, &mut channels, &mut authors)?);
             }
         }
         snapshot.commit()?;
+        let lines = lines_of(&flow);
         Ok(ReplicaReader {
             connection,
             flow,
-            channel_numbers,
+            lines,
+            revision: 0,
+            channels,
+            authors,
             narrowed: RefCell::new(None),
             last_arrival,
         })
@@ -129,39 +117,34 @@ impl ReplicaReader {
     }
 
     pub fn catch_up(&mut self) -> Result<bool, ReplicaError> {
-        let mut statement = self.connection.prepare_cached(
-            "SELECT arrivals.sequence, messages.created_at, messages.id, messages.channel
-             FROM arrivals JOIN messages ON messages.id = arrivals.id
-             WHERE arrivals.sequence > ?1
-             ORDER BY arrivals.sequence",
-        )?;
-        let arrived = statement.query_map(params![self.last_arrival], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        })?;
-        let mut caught_up = false;
-        for arrival in arrived {
-            let (sequence, created_at, id, channel) = arrival?;
-            let channel = self.channel_numbers.number_of(&channel);
-            let place = self
-                .flow
-                .partition_point(|ordered| ordered.comes_before(&created_at, &id));
-            self.flow.insert(
-                place,
-                OrderedMessage {
-                    created_at: created_at.into_boxed_str(),
-                    id: id.into_boxed_str(),
-                    channel,
-                },
-            );
-            self.last_arrival = sequence;
-            caught_up = true;
+        let mut arrived = Vec::new();
+        {
+            let mut statement = self.connection.prepare_cached(&format!(
+                "SELECT arrivals.sequence, {ORDERED_MESSAGE_COLUMNS}
+                 FROM arrivals JOIN messages ON messages.id = arrivals.id
+                 WHERE arrivals.sequence > ?1
+                 ORDER BY arrivals.sequence"
+            ))?;
+            let mut rows = statement.query(params![self.last_arrival])?;
+            while let Some(row) = rows.next()? {
+                let sequence: i64 = row.get(0)?;
+                let ordered = ordered_message(row, 1, &mut self.channels, &mut self.authors)?;
+                arrived.push((sequence, ordered));
+            }
         }
-        Ok(caught_up)
+        if arrived.is_empty() {
+            return Ok(false);
+        }
+        for (sequence, ordered) in arrived {
+            let place = self.flow.partition_point(|existing| {
+                existing.comes_before(&ordered.created_at, &ordered.id)
+            });
+            self.flow.insert(place, ordered);
+            self.last_arrival = sequence;
+        }
+        self.lines = lines_of(&self.flow);
+        self.revision = self.revision.wrapping_add(1);
+        Ok(true)
     }
 
     pub fn flow_window_in(
@@ -171,48 +154,52 @@ impl ReplicaReader {
         count: u32,
     ) -> Result<FlowWindow, ReplicaError> {
         let Some(channel) = channel else {
-            return self.window_of(self.flow.len(), Some, start, count);
+            return self.window_of(
+                self.lines.len(),
+                |index| self.lines.get(index),
+                start,
+                count,
+            );
         };
         let mut narrowed = self.narrowed.borrow_mut();
         let is_current = narrowed.as_ref().is_some_and(|narrowed| {
-            narrowed.channel == channel && narrowed.flow_length == self.flow.len()
+            narrowed.channel == channel && narrowed.revision == self.revision
         });
         if !is_current {
-            let within = self.channel_numbers.within(channel);
-            let positions = self
-                .flow
+            let within = self.channels.within(channel);
+            let lines = self
+                .lines
                 .iter()
                 .enumerate()
-                .filter(|(_, ordered)| {
-                    within
-                        .get(usize::try_from(ordered.channel).unwrap_or(usize::MAX))
-                        .copied()
+                .filter(|(_, line)| {
+                    line.channel(&self.flow)
+                        .and_then(|number| within.get(usize::try_from(number).ok()?).copied())
                         .unwrap_or(false)
                 })
-                .map(|(position, _)| position)
+                .map(|(index, _)| index)
                 .collect();
             *narrowed = Some(Narrowed {
                 channel: channel.to_owned(),
-                flow_length: self.flow.len(),
-                positions,
+                revision: self.revision,
+                lines,
             });
         }
-        let positions = narrowed
+        let lines = narrowed
             .as_ref()
-            .map(|narrowed| narrowed.positions.as_slice())
+            .map(|narrowed| narrowed.lines.as_slice())
             .unwrap_or_default();
         self.window_of(
-            positions.len(),
-            |index| positions.get(index).copied(),
+            lines.len(),
+            |index| lines.get(index).and_then(|line| self.lines.get(*line)),
             start,
             count,
         )
     }
 
-    fn window_of(
-        &self,
+    fn window_of<'lines>(
+        &'lines self,
         total: usize,
-        position_of: impl Fn(usize) -> Option<usize>,
+        line_at: impl Fn(usize) -> Option<&'lines Line>,
         start: u32,
         count: u32,
     ) -> Result<FlowWindow, ReplicaError> {
@@ -230,22 +217,56 @@ impl ReplicaReader {
         )?;
         let mut rows = Vec::with_capacity(last - first);
         for index in first..last {
-            let Some(ordered) = position_of(index).and_then(|position| self.flow.get(position))
-            else {
+            let Some(line) = line_at(index) else {
                 break;
             };
             let previous_minute = index
                 .checked_sub(1)
-                .and_then(&position_of)
-                .and_then(|position| self.flow.get(position))
+                .and_then(&line_at)
+                .and_then(|previous| self.message_at(previous.latest()))
                 .map(OrderedMessage::minute);
-            let first_of_its_minute = previous_minute != Some(ordered.minute());
-            rows.push(read_row(&mut statement, ordered, first_of_its_minute)?);
+            let Some(latest) = self.message_at(line.latest()) else {
+                break;
+            };
+            let first_of_its_minute = previous_minute != Some(latest.minute());
+            let mut row = read_row(&mut statement, latest, first_of_its_minute)?;
+            if let Line::Fold { members, .. } = line {
+                row.fold = Some(self.fold_of(&mut statement, members)?);
+            }
+            rows.push(row);
         }
         Ok(FlowWindow {
             total: u32::try_from(total).unwrap_or(u32::MAX),
             start: u32::try_from(first).unwrap_or(u32::MAX),
             rows,
+        })
+    }
+
+    fn message_at(&self, position: Option<usize>) -> Option<&OrderedMessage> {
+        position.and_then(|position| self.flow.get(position))
+    }
+
+    fn fold_of(
+        &self,
+        statement: &mut CachedStatement<'_>,
+        members: &[usize],
+    ) -> Result<FlowFold, ReplicaError> {
+        let agents: HashSet<u32> = members
+            .iter()
+            .filter_map(|position| self.flow.get(*position))
+            .map(|message| message.author)
+            .collect();
+        let shown_from = members.len().saturating_sub(MESSAGES_A_FOLD_SHOWS);
+        let mut recent = Vec::new();
+        for position in members.get(shown_from..).unwrap_or_default() {
+            if let Some(member) = self.flow.get(*position) {
+                recent.push(read_row(statement, member, false)?);
+            }
+        }
+        Ok(FlowFold {
+            count: u32::try_from(members.len()).unwrap_or(u32::MAX),
+            agents: u32::try_from(agents.len()).unwrap_or(u32::MAX),
+            recent,
         })
     }
 }
@@ -266,6 +287,7 @@ fn read_row(
             edited: row.get(4)?,
             deleted: row.get(5)?,
             first_of_its_minute,
+            fold: None,
         })
     })?;
     Ok(row)

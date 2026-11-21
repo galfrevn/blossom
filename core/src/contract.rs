@@ -9,6 +9,7 @@ pub fn typescript() -> String {
         StopReason::decl(&configuration),
         ReplicaState::decl(&configuration),
         FlowRow::decl(&configuration),
+        FlowFold::decl(&configuration),
         FlowWindow::decl(&configuration),
         FlowChange::decl(&configuration),
     ];
@@ -71,6 +72,14 @@ pub struct FlowRow {
     pub edited: bool,
     pub deleted: bool,
     pub first_of_its_minute: bool,
+    pub fold: Option<FlowFold>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+pub struct FlowFold {
+    pub count: u32,
+    pub agents: u32,
+    pub recent: Vec<FlowRow>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
