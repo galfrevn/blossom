@@ -1,34 +1,32 @@
 import { useSyncExternalStore } from "react";
-import type { Core } from "./client";
-import type { OpenBoard } from "./contract";
 
-export type OpenBoardStore = {
+export type Store<Value> = {
   subscribe: (onChange: () => void) => () => void;
-  getSnapshot: () => OpenBoard | undefined;
+  getSnapshot: () => Value | undefined;
 };
 
-export function createOpenBoardStore(core: Core): OpenBoardStore {
-  let currentOpenBoard: OpenBoard | undefined;
+export function createStore<Value>(
+  subscribeToCore: (listener: (value: Value) => void) => () => void,
+): Store<Value> {
+  let currentValue: Value | undefined;
   const changeListeners = new Set<() => void>();
-  core.subscribeToOpenBoard((openBoard) => {
-    currentOpenBoard = openBoard;
+  subscribeToCore((value) => {
+    currentValue = value;
     for (const onChange of changeListeners) {
       onChange();
     }
   });
   return {
-    subscribe(onChange) {
+    subscribe: (onChange) => {
       changeListeners.add(onChange);
       return () => {
         changeListeners.delete(onChange);
       };
     },
-    getSnapshot() {
-      return currentOpenBoard;
-    },
+    getSnapshot: () => currentValue,
   };
 }
 
-export function useOpenBoard(store: OpenBoardStore): OpenBoard | undefined {
+export function useStore<Value>(store: Store<Value>): Value | undefined {
   return useSyncExternalStore(store.subscribe, store.getSnapshot);
 }

@@ -8,12 +8,14 @@ use std::time::SystemTime;
 use reqwest::Url;
 use serde::Deserialize;
 
+use crate::access::BoardAccess;
+
 const LOOPBACK_HOSTS: [&str; 3] = ["127.0.0.1", "localhost", "[::1]"];
 
 #[derive(Deserialize)]
-pub struct LocalBoard {
-    pub url: String,
-    pub token: String,
+struct TokenFile {
+    url: String,
+    token: String,
 }
 
 pub fn token_folder(xdg_config_home: Option<&OsStr>, home: Option<&OsStr>) -> Option<PathBuf> {
@@ -63,11 +65,11 @@ pub fn snapshot_token_folder(token_folder: &Path) -> TokenFolderSnapshot {
     }
 }
 
-pub fn local_boards_newest_first(token_folder: &Path) -> Vec<LocalBoard> {
+pub fn local_boards_newest_first(token_folder: &Path) -> Vec<BoardAccess> {
     let Ok(entries) = fs::read_dir(token_folder) else {
         return Vec::new();
     };
-    let mut boards_with_their_write_times: Vec<(SystemTime, LocalBoard)> = entries
+    let mut boards_with_their_write_times: Vec<(SystemTime, BoardAccess)> = entries
         .filter_map(Result::ok)
         .filter_map(|entry| read_local_board(&entry.path()))
         .collect();
@@ -78,14 +80,17 @@ pub fn local_boards_newest_first(token_folder: &Path) -> Vec<LocalBoard> {
         .collect()
 }
 
-fn read_local_board(token_file: &Path) -> Option<(SystemTime, LocalBoard)> {
+fn read_local_board(token_file: &Path) -> Option<(SystemTime, BoardAccess)> {
     let written_at = fs::metadata(token_file).ok()?.modified().ok()?;
     let contents = fs::read_to_string(token_file).ok()?;
-    let local_board: LocalBoard = serde_json::from_str(&contents).ok()?;
-    if !is_on_loopback(&local_board.url) {
+    let token_file: TokenFile = serde_json::from_str(&contents).ok()?;
+    if !is_on_loopback(&token_file.url) {
         return None;
     }
-    Some((written_at, local_board))
+    Some((
+        written_at,
+        BoardAccess::new(token_file.url, token_file.token),
+    ))
 }
 
 fn is_on_loopback(url: &str) -> bool {

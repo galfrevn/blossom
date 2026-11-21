@@ -4,8 +4,8 @@ use reqwest::Client;
 use reqwest::redirect::Policy;
 use serde::Deserialize;
 
+use crate::access::BoardAccess;
 use crate::contract::Person;
-use crate::local::LocalBoard;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -29,8 +29,8 @@ pub fn client() -> Option<Client> {
         .ok()
 }
 
-pub async fn discovery_names_its_own_url(client: &Client, local_board: &LocalBoard) -> bool {
-    let Ok(response) = client.get(&local_board.url).send().await else {
+pub async fn discovery_names_its_own_url(client: &Client, access: &BoardAccess) -> bool {
+    let Ok(response) = client.get(access.url()).send().await else {
         return false;
     };
     let Ok(accepted_response) = response.error_for_status() else {
@@ -39,18 +39,18 @@ pub async fn discovery_names_its_own_url(client: &Client, local_board: &LocalBoa
     let Ok(discovery) = accepted_response.json::<Discovery>().await else {
         return false;
     };
-    without_trailing_slash(&discovery.url) == without_trailing_slash(&local_board.url)
+    without_trailing_slash(&discovery.url) == without_trailing_slash(access.url())
 }
 
 fn without_trailing_slash(url: &str) -> &str {
     url.trim_end_matches('/')
 }
 
-pub async fn person_on(client: &Client, local_board: &LocalBoard) -> Option<Person> {
-    let me_url = format!("{}/me", local_board.url);
+pub async fn person_on(client: &Client, access: &BoardAccess) -> Option<Person> {
+    let me_url = format!("{}/me", access.url());
     let response = client
         .get(me_url)
-        .bearer_auth(&local_board.token)
+        .bearer_auth(access.token())
         .send()
         .await
         .ok()?;

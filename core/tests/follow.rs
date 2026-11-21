@@ -178,3 +178,28 @@ async fn a_board_that_did_not_answer_when_its_file_appeared_opens_once_it_answer
         })
     );
 }
+
+#[tokio::test]
+async fn the_follower_keeps_the_open_boards_access_for_copying_it() {
+    let board = start_fake_board("token-of-ada", "ada", "Ada Lovelace").await;
+    let token_folder = TempDir::new().unwrap();
+    write_token_file(
+        token_folder.path(),
+        "board.json",
+        &board.url,
+        "token-of-ada",
+        0,
+    )
+    .unwrap();
+    let mut follower = OpenBoardFollower::new(token_folder.path().to_path_buf());
+
+    follower.look().await;
+    let url_while_open = follower
+        .access_to_open_board()
+        .map(|access| access.url().to_owned());
+    std::fs::remove_file(token_folder.path().join("board.json")).unwrap();
+    follower.look().await;
+
+    assert_eq!(url_while_open, Some(board.url.clone()));
+    assert!(follower.access_to_open_board().is_none());
+}

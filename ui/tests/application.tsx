@@ -1,24 +1,43 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { Application } from "../application";
-import type { OpenBoard } from "../core/contract";
+import type { OpenBoard, ReplicaState } from "../core/contract";
 import { createFakeCore } from "../core/fake";
-import { createOpenBoardStore } from "../core/store";
+import { createStore } from "../core/store";
 
 afterEach(cleanup);
 
-function renderApplicationWhileTheCoreSays(openBoard?: OpenBoard) {
+const boardOfAda: OpenBoard = {
+  kind: "open",
+  url: "http://127.0.0.1:4100/api/board",
+  person: { handle: "ada", name: "Ada Lovelace" },
+};
+
+function renderApplicationWhileTheCoreSays(said: {
+  openBoard?: OpenBoard;
+  replicaState?: ReplicaState;
+}) {
   const fakeCore = createFakeCore();
-  const openBoardStore = createOpenBoardStore(fakeCore.core);
-  if (openBoard !== undefined) {
-    fakeCore.push(openBoard);
+  const openBoardStore = createStore(fakeCore.core.subscribeToOpenBoard);
+  const replicaStore = createStore(fakeCore.core.subscribeToReplica);
+  if (said.openBoard !== undefined) {
+    fakeCore.pushOpenBoard(said.openBoard);
   }
-  render(<Application openBoardStore={openBoardStore} />);
+  if (said.replicaState !== undefined) {
+    fakeCore.pushReplicaState(said.replicaState);
+  }
+  render(
+    <Application openBoardStore={openBoardStore} replicaStore={replicaStore} />,
+  );
   return fakeCore;
 }
 
+function statusBar() {
+  return within(screen.getByRole("contentinfo"));
+}
+
 test("the window is dragged by its title bar", () => {
-  renderApplicationWhileTheCoreSays({ kind: "noneRunning" });
+  renderApplicationWhileTheCoreSays({ openBoard: { kind: "noneRunning" } });
 
   const titleBar = screen.getByRole("banner");
 
@@ -26,7 +45,7 @@ test("the window is dragged by its title bar", () => {
 });
 
 test("with no board running, it shows how to start one", () => {
-  renderApplicationWhileTheCoreSays({ kind: "noneRunning" });
+  renderApplicationWhileTheCoreSays({ openBoard: { kind: "noneRunning" } });
 
   expect(
     screen.getByRole("heading", { name: "No board running" }),
@@ -35,26 +54,20 @@ test("with no board running, it shows how to start one", () => {
 });
 
 test("with a board open, the status bar shows its address and who you are on it", () => {
-  renderApplicationWhileTheCoreSays({
-    kind: "open",
-    url: "http://127.0.0.1:4100/api/board",
-    person: { handle: "ada", name: "Ada Lovelace" },
-  });
-
-  const statusBar = screen.getByRole("contentinfo");
+  renderApplicationWhileTheCoreSays({ openBoard: boardOfAda });
 
   expect(
-    within(statusBar).getByText("http://127.0.0.1:4100/api/board"),
+    statusBar().getByText("http://127.0.0.1:4100/api/board"),
   ).toBeDefined();
-  expect(within(statusBar).getByText("Ada Lovelace")).toBeDefined();
-  expect(within(statusBar).getByText("@ada")).toBeDefined();
+  expect(statusBar().getByText("Ada Lovelace")).toBeDefined();
+  expect(statusBar().getByText("@ada")).toBeDefined();
   expect(
     screen.queryByRole("heading", { name: "No board running" }),
   ).toBeNull();
 });
 
 test("until the core answers, it shows neither screen", () => {
-  renderApplicationWhileTheCoreSays();
+  renderApplicationWhileTheCoreSays({});
 
   expect(
     screen.queryByRole("heading", { name: "No board running" }),
@@ -63,29 +76,61 @@ test("until the core answers, it shows neither screen", () => {
 });
 
 test("the screen follows the core as a board starts and stops", () => {
-  const fakeCore = renderApplicationWhileTheCoreSays({ kind: "noneRunning" });
-
-  act(() => {
-    fakeCore.push({
-      kind: "open",
-      url: "http://127.0.0.1:4100/api/board",
-      person: { handle: "ada", name: "Ada Lovelace" },
-    });
+  const fakeCore = renderApplicationWhileTheCoreSays({
+    openBoard: { kind: "noneRunning" },
   });
 
-  expect(
-    within(screen.getByRole("contentinfo")).getByText("Ada Lovelace"),
-  ).toBeDefined();
+  act(() => {
+    fakeCore.pushOpenBoard(boardOfAda);
+  });
+
+  expect(statusBar().getByText("Ada Lovelace")).toBeDefined();
   expect(
     screen.queryByRole("heading", { name: "No board running" }),
   ).toBeNull();
 
   act(() => {
-    fakeCore.push({ kind: "noneRunning" });
+    fakeCore.pushOpenBoard({ kind: "noneRunning" });
   });
 
   expect(
     screen.getByRole("heading", { name: "No board running" }),
   ).toBeDefined();
   expect(screen.queryByRole("contentinfo")).toBeNull();
+});
+
+test("while the board is copied, the status bar says how far along the copy is", () => {
+  renderApplicationWhileTheCoreSays({
+    openBoard: boardOfAda,
+    replicaState: { kind: "copying", stored: 42_000, total: 100_006 },
+  });
+
+  expect(statusBar().getByText("Copying 42,000 of 100,006")).toBeDefined();
+});
+
+test("when the board does not say its total, the status bar says how many are copied so far", () => {
+  renderApplicationWhileTheCoreSays({
+    openBoard: boardOfAda,
+    replicaState: { kind: "copying", stored: 42_000, total: null },
+  });
+
+  expect(statusBar().getByText("Copying 42,000")).toBeDefined();
+});
+
+test("once the board is copied, the status bar says how many messages the replica holds", () => {
+  renderApplicationWhileTheCoreSays({
+    openBoard: boardOfAda,
+    replicaState: { kind: "copied", stored: 100_006 },
+  });
+
+  expect(statusBar().getByText("100,006 messages")).toBeDefined();
+});
+
+test("a replica of one message says so in the singular", () => {
+  renderApplicationWhileTheCoreSays({
+    openBoard: boardOfAda,
+    replicaState: { kind: "copied", stored: 1 },
+  });
+
+  expect(statusBar().getByText("1 message")).toBeDefined();
 });

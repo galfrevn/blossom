@@ -6,6 +6,7 @@ pub fn typescript() -> String {
     let declarations = [
         Person::decl(&configuration),
         OpenBoard::decl(&configuration),
+        ReplicaState::decl(&configuration),
     ];
     declarations
         .iter()
@@ -25,4 +26,11 @@ pub struct Person {
 pub enum OpenBoard {
     NoneRunning,
     Open { url: String, person: Person },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ReplicaState {
+    Copying { stored: u32, total: Option<u32> },
+    Copied { stored: u32 },
 }

@@ -1,31 +1,43 @@
 import type { Core } from "./client";
-import type { OpenBoard } from "./contract";
+import type { OpenBoard, ReplicaState } from "./contract";
+
+function createFakeSubscription<Value>() {
+  const listeners = new Set<(value: Value) => void>();
+  let latestValue: Value | undefined;
+  return {
+    subscribe: (listener: (value: Value) => void) => {
+      listeners.add(listener);
+      if (latestValue !== undefined) {
+        listener(latestValue);
+      }
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    push: (value: Value) => {
+      latestValue = value;
+      for (const listener of listeners) {
+        listener(value);
+      }
+    },
+  };
+}
 
 export type FakeCore = {
   core: Core;
-  push: (openBoard: OpenBoard) => void;
+  pushOpenBoard: (openBoard: OpenBoard) => void;
+  pushReplicaState: (replicaState: ReplicaState) => void;
 };
 
 export function createFakeCore(): FakeCore {
-  const listeners = new Set<(openBoard: OpenBoard) => void>();
-  let latestOpenBoard: OpenBoard | undefined;
+  const openBoard = createFakeSubscription<OpenBoard>();
+  const replica = createFakeSubscription<ReplicaState>();
   return {
     core: {
-      subscribeToOpenBoard(listener) {
-        listeners.add(listener);
-        if (latestOpenBoard !== undefined) {
-          listener(latestOpenBoard);
-        }
-        return () => {
-          listeners.delete(listener);
-        };
-      },
+      subscribeToOpenBoard: openBoard.subscribe,
+      subscribeToReplica: replica.subscribe,
     },
-    push(openBoard) {
-      latestOpenBoard = openBoard;
-      for (const listener of listeners) {
-        listener(openBoard);
-      }
-    },
+    pushOpenBoard: openBoard.push,
+    pushReplicaState: replica.push,
   };
 }

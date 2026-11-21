@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { Application } from "./application";
 import type { Core } from "./core/client";
 import { createFakeCore } from "./core/fake";
-import { createOpenBoardStore } from "./core/store";
+import { createStore } from "./core/store";
 import { createTauriCore } from "./core/tauri";
 
 function coreForThisWindow(): Core {
@@ -13,7 +13,7 @@ function coreForThisWindow(): Core {
     return createTauriCore();
   }
   const fakeCore = createFakeCore();
-  fakeCore.push({ kind: "noneRunning" });
+  fakeCore.pushOpenBoard({ kind: "noneRunning" });
   return fakeCore.core;
 }
 
@@ -22,10 +22,12 @@ if (rootElement === null) {
   throw new Error("index.html has no element with the id root");
 }
 
-const openBoardStore = createOpenBoardStore(coreForThisWindow());
+const core = coreForThisWindow();
+const openBoardStore = createStore(core.subscribeToOpenBoard);
+const replicaStore = createStore(core.subscribeToReplica);
 
 createRoot(rootElement).render(
   <StrictMode>
-    <Application openBoardStore={openBoardStore} />
+    <Application openBoardStore={openBoardStore} replicaStore={replicaStore} />
   </StrictMode>,
 );

@@ -1,23 +1,31 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { Core } from "./client";
-import type { OpenBoard } from "./contract";
+import type { OpenBoard, ReplicaState } from "./contract";
+
+function subscribeOverChannel<Value>(
+  command: string,
+  listener: (value: Value) => void,
+): () => void {
+  const channel = new Channel<Value>();
+  let subscribed = true;
+  channel.onmessage = (value) => {
+    if (subscribed) {
+      listener(value);
+    }
+  };
+  invoke(command, { channel }).catch((error: unknown) => {
+    console.error(`blossom: the core refused ${command}`, error);
+  });
+  return () => {
+    subscribed = false;
+  };
+}
 
 export function createTauriCore(): Core {
   return {
-    subscribeToOpenBoard(listener) {
-      const channel = new Channel<OpenBoard>();
-      let subscribed = true;
-      channel.onmessage = (openBoard) => {
-        if (subscribed) {
-          listener(openBoard);
-        }
-      };
-      invoke("subscribe_to_open_board", { channel }).catch((error: unknown) => {
-        console.error("blossom: the core refused the subscription", error);
-      });
-      return () => {
-        subscribed = false;
-      };
-    },
+    subscribeToOpenBoard: (listener) =>
+      subscribeOverChannel<OpenBoard>("subscribe_to_open_board", listener),
+    subscribeToReplica: (listener) =>
+      subscribeOverChannel<ReplicaState>("subscribe_to_replica", listener),
   };
 }
