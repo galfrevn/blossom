@@ -63,8 +63,7 @@ if grep -q -E '\.rs$|(^|/)Cargo\.(toml|lock)$|(^|/)(clippy|rustfmt)\.toml$' "$ch
   bun run --silent rust:lint
 fi
 
-if grep -q -E '^ui/|^(package\.json|bun\.lock|biome\.json)$' "$changed_files"; then
-  checks_run="$checks_run, ui"
+if grep -q -E '^ui/|^desktop/icons/|^(package\.json|bun\.lock|biome\.json)$' "$changed_files"; then
   while read -r changed_file; do
     if [ -e "$changed_file" ]; then
       echo "$changed_file"
@@ -73,5 +72,14 @@ if grep -q -E '^ui/|^(package\.json|bun\.lock|biome\.json)$' "$changed_files"; t
   if [ -s "$existing_changed_files" ]; then
     tr '\n' '\0' < "$existing_changed_files" | xargs -0 bun run --silent ui:lint
   fi
+fi
+
+if grep -q -E '^ui/|^(package\.json|bun\.lock|biome\.json)$' "$changed_files"; then
+  checks_run="$checks_run, ui"
   bun run --silent ui:types
+fi
+
+if grep -q -E '^desktop/icons/' "$changed_files"; then
+  checks_run="$checks_run, icons"
+  bun run --silent icons:test
 fi

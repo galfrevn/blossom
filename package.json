@@ -13,7 +13,8 @@
     "rust:lint": "cargo clippy --workspace --all-targets --quiet -- --deny warnings",
     "ui:lint": "biome check --no-errors-on-unmatched --files-ignore-unknown=true",
     "ui:types": "bun run --cwd ui types",
-    "check": "bun run conventions && bun run rust:format && bun run rust:lint && cargo test --workspace --quiet && bun run ui:lint && bun run ui:types && bun run --cwd ui test && bun run --cwd ui build && sh budgets.sh javascript"
+    "icons:test": "bun test ./desktop/icons/tests/*.ts",
+    "check": "bun run conventions && bun run rust:format && bun run rust:lint && cargo test --workspace --quiet && bun run ui:lint && bun run ui:types && bun run --cwd ui test && bun run icons:test && bun run --cwd ui build && sh budgets.sh javascript"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",

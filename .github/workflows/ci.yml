@@ -50,6 +50,7 @@ jobs:
       - run: ./node_modules/.bin/biome check
       - run: bun run --cwd ui types
       - run: bun run --cwd ui test
+      - run: bun run icons:test
       - run: bun run --cwd ui build
       - run: sh budgets.sh javascript
       - run: sh budgets.sh time linux 70

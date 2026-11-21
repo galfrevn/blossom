@@ -6,7 +6,13 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["ui/**", "!ui/core/contract.ts", "package.json", "biome.json"]
+    "includes": [
+      "ui/**",
+      "desktop/icons/**/*.ts",
+      "!ui/core/contract.ts",
+      "package.json",
+      "biome.json"
+    ]
   },
   "formatter": {
     "indentStyle": "space",
@@ -82,6 +88,20 @@
         "rules": {
           "style": {
             "noDefaultExport": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["desktop/icons/**/*.ts"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noNodejsModules": "off",
+            "noProcessGlobal": "off"
+          },
+          "suspicious": {
+            "noBitwiseOperators": "off"
           }
         }
       }
