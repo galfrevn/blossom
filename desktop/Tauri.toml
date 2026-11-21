@@ -33,7 +33,7 @@ permissions = ["core:window:allow-start-dragging", "allow-subscribe-to-open-boar
 active = true
 targets = ["dmg"]
 icon = ["icons/icon.png", "icons/icon.icns"]
-resources = { "../ui/node_modules/geist/LICENSE.txt" = "licenses/geist.txt" }
+resources = { "licenses/geist.txt" = "licenses/geist.txt" }
 
 [bundle.macOS]
 minimumSystemVersion = "13.3"
