@@ -44,6 +44,10 @@ Specs and tickets are markdown files under `.scratch/`. See `documentation/agent
 
 The five default roles, unchanged. See `documentation/agents/labels.md`.
 
+### Parallel sessions
+
+Each session works in a folder of its own, and one integrator makes every commit. See `documentation/agents/parallel.md`.
+
 ### Domain docs
 
 Single context: `GLOSSARY.md` at the root, ADRs under `documentation/adr/`. See `documentation/agents/domain.md`.

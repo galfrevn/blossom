@@ -66,6 +66,7 @@ The rules for writing code are in `CLAUDE.md` at the repository root.
 - [agents/domain.md](agents/domain.md): how skills read the glossary and record ADRs.
 - [agents/tracker.md](agents/tracker.md): where specs and tickets live.
 - [agents/labels.md](agents/labels.md): the triage roles.
+- [agents/parallel.md](agents/parallel.md): how several sessions work at once, each in its own folder, with one integrator for every commit.
 
 ## Research
 
