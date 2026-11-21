@@ -34,7 +34,7 @@ pub struct FakeActor {
     profile: Option<String>,
     kind: String,
     handle: String,
-    name: String,
+    pub name: String,
     via: Option<String>,
 }
 
@@ -128,7 +128,25 @@ pub struct BoardHistory {
 
 impl BoardHistory {
     pub fn post(&mut self, id: &str, channel: &str, thread_root: &str, minute: u32, text: &str) {
-        let author = the_person_with_the_token();
+        self.post_as(
+            &the_person_with_the_token(),
+            id,
+            channel,
+            thread_root,
+            minute,
+            text,
+        );
+    }
+
+    pub fn post_as(
+        &mut self,
+        author: &FakeActor,
+        id: &str,
+        channel: &str,
+        thread_root: &str,
+        minute: u32,
+        text: &str,
+    ) {
         let thread = format!("thread-{thread_root}");
         let re = if id == thread_root {
             Value::Null
@@ -157,7 +175,7 @@ impl BoardHistory {
             event_type: String::from("message.posted"),
             created_at: time_at(minute),
             payload,
-            actor: Some(author),
+            actor: Some(author.clone()),
             message,
         });
     }

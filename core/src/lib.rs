@@ -13,6 +13,7 @@ pub mod reader;
 pub mod replica;
 pub mod sse;
 mod storage;
+pub mod time;
 
 use std::path::Path;
 

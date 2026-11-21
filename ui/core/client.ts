@@ -1,4 +1,5 @@
 import type {
+  Agent,
   FlowChange,
   FlowWindow,
   OpenBoard,
@@ -15,6 +16,7 @@ export type Core = {
   ) => () => void;
   subscribeToChannels: (listener: (channels: string[]) => void) => () => void;
   subscribeToFlow: (listener: (change: FlowChange) => void) => () => void;
+  subscribeToFleet: (listener: (agents: Agent[]) => void) => () => void;
   readFlow: (
     channel: string | null,
     start: number,

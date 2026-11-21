@@ -17,3 +17,7 @@ export type FlowChange = { revision: number, };
 export type ThreadMessage = { id: string, author: string, onBehalfOf: string | null, createdAt: string, text: string, edited: boolean, deleted: boolean, };
 
 export type Thread = { id: string, channel: string, messages: Array<ThreadMessage>, };
+
+export type HeldTask = { task: string, until: string, };
+
+export type Agent = { id: string, name: string, onBehalfOf: string | null, holds: HeldTask | null, lapsed: boolean, failedRecently: boolean, channel: string | null, };

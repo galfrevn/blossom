@@ -14,6 +14,8 @@ pub fn typescript() -> String {
         FlowChange::decl(&configuration),
         ThreadMessage::decl(&configuration),
         Thread::decl(&configuration),
+        HeldTask::decl(&configuration),
+        Agent::decl(&configuration),
     ];
     declarations
         .iter()
@@ -113,4 +115,22 @@ pub struct Thread {
     pub id: String,
     pub channel: String,
     pub messages: Vec<ThreadMessage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+pub struct HeldTask {
+    pub task: String,
+    pub until: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Agent {
+    pub id: String,
+    pub name: String,
+    pub on_behalf_of: Option<String>,
+    pub holds: Option<HeldTask>,
+    pub lapsed: bool,
+    pub failed_recently: bool,
+    pub channel: Option<String>,
 }

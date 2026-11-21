@@ -1,3 +1,4 @@
+mod fleet;
 mod lines;
 mod numbers;
 mod thread;
@@ -9,7 +10,7 @@ use std::path::Path;
 use rusqlite::types::Type;
 use rusqlite::{CachedStatement, Connection, OpenFlags, Row, params};
 
-use crate::contract::{FlowFold, FlowRow, FlowWindow};
+use crate::contract::{Agent, FlowFold, FlowRow, FlowWindow};
 use crate::replica::ReplicaError;
 use lines::{Line, OrderedMessage, lines_of};
 use numbers::Numbers;
@@ -115,6 +116,10 @@ impl ReplicaReader {
             channels.push(path?);
         }
         Ok(channels)
+    }
+
+    pub fn fleet(&self, now: &str) -> Result<Vec<Agent>, ReplicaError> {
+        Ok(fleet::fleet(&self.connection, now)?)
     }
 
     pub fn catch_up(&mut self) -> Result<bool, ReplicaError> {

@@ -1,5 +1,6 @@
 import type { Core } from "./client";
 import type {
+  Agent,
   FlowChange,
   FlowRow,
   OpenBoard,
@@ -50,6 +51,7 @@ export type FakeCore = {
   pushChannels: (channels: string[]) => void;
   pushFlow: (rows: FlowRow[]) => void;
   pushThreads: (threads: Thread[]) => void;
+  pushFleet: (agents: Agent[]) => void;
 };
 
 export function createFakeCore(): FakeCore {
@@ -57,6 +59,7 @@ export function createFakeCore(): FakeCore {
   const replica = createFakeSubscription<ReplicaState>();
   const channels = createFakeSubscription<string[]>();
   const flow = createFakeSubscription<FlowChange>();
+  const fleet = createFakeSubscription<Agent[]>();
   let flowRows: FlowRow[] = [];
   let threads: Thread[] = [];
   let flowRevision = 0;
@@ -70,6 +73,7 @@ export function createFakeCore(): FakeCore {
       subscribeToReplica: replica.subscribe,
       subscribeToChannels: channels.subscribe,
       subscribeToFlow: flow.subscribe,
+      subscribeToFleet: fleet.subscribe,
       readFlow: (channel, start, count) => {
         const narrowed = flowRows.filter((row) =>
           isWithin(row.channel, channel),
@@ -94,5 +98,6 @@ export function createFakeCore(): FakeCore {
       threads = newThreads;
       announceTheChange();
     },
+    pushFleet: fleet.push,
   };
 }

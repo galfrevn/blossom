@@ -8,6 +8,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "subscribe_to_replica",
         "subscribe_to_channels",
         "subscribe_to_flow",
+        "subscribe_to_fleet",
         "read_flow",
         "read_thread",
     ]);

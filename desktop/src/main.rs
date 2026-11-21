@@ -4,10 +4,11 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use blossom::contract::{FlowChange, FlowWindow, OpenBoard, ReplicaState, Thread};
+use blossom::contract::{Agent, FlowChange, FlowWindow, OpenBoard, ReplicaState, Thread};
 use blossom::reader::ReplicaReader;
+use blossom::time::board_time;
 use blossom::{BoardAccess, KeepingEnded, OpenBoardFollower, Pacing, keep_in_step};
 use tauri::async_runtime::JoinHandle;
 use tauri::ipc::{Channel, IpcResponse};
@@ -16,6 +17,7 @@ use tauri::{Manager, State};
 use tokio::sync::watch;
 
 const TIME_BETWEEN_LOOKS: Duration = Duration::from_secs(1);
+const TIME_BETWEEN_FLEET_READS: Duration = Duration::from_secs(1);
 
 #[derive(Default)]
 struct RunningTask {
@@ -45,11 +47,14 @@ struct Session {
     channels: watch::Sender<Option<Vec<String>>>,
     flow: watch::Sender<Option<FlowChange>>,
     flow_revision: AtomicU32,
+    fleet: watch::Sender<Option<Vec<Agent>>>,
     following_open_board: RunningTask,
     forwarding_replica_state: RunningTask,
     forwarding_channels: RunningTask,
     forwarding_flow: RunningTask,
+    forwarding_fleet: RunningTask,
     keeping_in_step: RunningTask,
+    rereading_the_fleet: RunningTask,
     open_board_gone: AtomicBool,
 }
 
@@ -58,6 +63,7 @@ impl Session {
         let (replica_state, _) = watch::channel(None);
         let (channels, _) = watch::channel(None);
         let (flow, _) = watch::channel(None);
+        let (fleet, _) = watch::channel(None);
         Session {
             replicas_folder,
             replica_state,
@@ -65,11 +71,14 @@ impl Session {
             channels,
             flow,
             flow_revision: AtomicU32::new(0),
+            fleet,
             following_open_board: RunningTask::default(),
             forwarding_replica_state: RunningTask::default(),
             forwarding_channels: RunningTask::default(),
             forwarding_flow: RunningTask::default(),
+            forwarding_fleet: RunningTask::default(),
             keeping_in_step: RunningTask::default(),
+            rereading_the_fleet: RunningTask::default(),
             open_board_gone: AtomicBool::new(false),
         }
     }
@@ -80,10 +89,14 @@ impl Session {
         let keeping =
             tauri::async_runtime::spawn(async move { session.keep_in_step(access).await });
         self.keeping_in_step.replace(keeping);
+        let session = Arc::clone(self);
+        let rereading = tauri::async_runtime::spawn(reread_the_fleet_as_time_passes(session));
+        self.rereading_the_fleet.replace(rereading);
     }
 
     fn stop_keeping_in_step(&self) {
         self.keeping_in_step.stop();
+        self.rereading_the_fleet.stop();
         self.replica_state.send_replace(None);
         self.forget_the_replica();
     }
@@ -102,6 +115,7 @@ impl Session {
         *self.reader.lock().unwrap_or_else(PoisonError::into_inner) = None;
         self.channels.send_replace(None);
         self.flow.send_replace(None);
+        self.fleet.send_replace(None);
     }
 
     fn refresh_from_the_replica(&self) {
@@ -128,6 +142,31 @@ impl Session {
                 });
             }
             Err(error) => eprintln!("blossom: the replica's channels could not be read: {error}"),
+        }
+        self.send_the_fleet(reader);
+    }
+
+    fn reread_the_fleet(&self) {
+        let reader = self.reader.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(reader) = reader.as_ref() else {
+            return;
+        };
+        self.send_the_fleet(reader);
+    }
+
+    fn send_the_fleet(&self, reader: &ReplicaReader) {
+        let now = board_time(SystemTime::now());
+        match reader.fleet(&now) {
+            Ok(agents) => {
+                self.fleet.send_if_modified(|current| {
+                    if current.as_ref() == Some(&agents) {
+                        return false;
+                    }
+                    *current = Some(agents);
+                    true
+                });
+            }
+            Err(error) => eprintln!("blossom: the replica's fleet could not be read: {error}"),
         }
     }
 
@@ -225,6 +264,20 @@ fn subscribe_to_channels(channel: Channel<Vec<String>>, session: State<'_, Arc<S
     session.forwarding_channels.replace(forwarding);
 }
 
+#[tauri::command]
+fn subscribe_to_fleet(channel: Channel<Vec<Agent>>, session: State<'_, Arc<Session>>) {
+    let receiver = session.fleet.subscribe();
+    let forwarding = tauri::async_runtime::spawn(forward(channel, receiver));
+    session.forwarding_fleet.replace(forwarding);
+}
+
+async fn reread_the_fleet_as_time_passes(session: Arc<Session>) {
+    loop {
+        tokio::time::sleep(TIME_BETWEEN_FLEET_READS).await;
+        session.reread_the_fleet();
+    }
+}
+
 async fn follow_open_board(channel: Channel<OpenBoard>, session: Arc<Session>) {
     let Some(token_folder) = blossom::token_folder_from_environment() else {
         send(&channel, OpenBoard::NoneRunning);
@@ -296,6 +349,7 @@ fn main() -> ExitCode {
             subscribe_to_replica,
             subscribe_to_channels,
             subscribe_to_flow,
+            subscribe_to_fleet,
             read_flow,
             read_thread
         ])
