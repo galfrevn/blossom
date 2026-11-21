@@ -35,8 +35,11 @@ impl OpenBoardFollower {
             });
         let nothing_left_to_try = found_board.is_some() || snapshot.has_no_files();
         self.settled_snapshot = nothing_left_to_try.then_some(snapshot);
-        self.access_to_open_board = found_board.map(|found_board| found_board.access);
-        if self.last_reported_open_board.as_ref() == Some(&open_board) {
+        let access = found_board.map(|found_board| found_board.access);
+        let access_changed = self.access_to_open_board != access;
+        self.access_to_open_board = access;
+        let open_board_changed = self.last_reported_open_board.as_ref() != Some(&open_board);
+        if !open_board_changed && !access_changed {
             return None;
         }
         self.last_reported_open_board = Some(open_board.clone());

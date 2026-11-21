@@ -7,8 +7,9 @@ use serde_json::value::RawValue;
 
 use crate::access::BoardAccess;
 use crate::contract::ReplicaState;
-use crate::protocol;
-use crate::replica::{MessageView, Replica, ReplicaError};
+use crate::protocol::{self, FeedEvent};
+use crate::replica::{MessageView, Replica};
+use crate::storage::{self, StorageError};
 
 const THREADS_PER_PAGE: &str = "500";
 const CHANNELS_PER_PAGE: &str = "500";
@@ -24,8 +25,7 @@ pub enum CopyError {
     InvalidAddress(String),
     Request(reqwest::Error),
     InvalidView(serde_json::Error),
-    Replica(ReplicaError),
-    StorageThread(tokio::task::JoinError),
+    Storage(StorageError),
 }
 
 impl fmt::Display for CopyError {
@@ -42,10 +42,7 @@ impl fmt::Display for CopyError {
                     "the board sent a message view the copy cannot read: {error}"
                 )
             }
-            CopyError::Replica(error) => write!(formatter, "{error}"),
-            CopyError::StorageThread(error) => {
-                write!(formatter, "the replica's storage thread stopped: {error}")
-            }
+            CopyError::Storage(error) => write!(formatter, "{error}"),
         }
     }
 }
@@ -82,11 +79,6 @@ struct EventsPage {
     cursor: String,
 }
 
-#[derive(Deserialize)]
-struct FeedEvent {
-    message: Option<Box<RawValue>>,
-}
-
 pub async fn copy_board(
     access: &BoardAccess,
     replica: Replica,
@@ -98,7 +90,9 @@ pub async fn copy_board(
     let threads = read_every_thread(&client, access).await?;
     let oldest_root_id = threads.oldest_root_id;
     let mut feed_cursor = threads.feed_cursor;
-    let (mut replica, mut stored) = store(replica, threads.views).await?;
+    let (mut replica, mut stored) = storage::store(replica, threads.views, None)
+        .await
+        .map_err(CopyError::Storage)?;
     report(ReplicaState::Copying { stored, total });
 
     if let Some(oldest_root_id) = oldest_root_id {
@@ -112,7 +106,9 @@ pub async fn copy_board(
                 .map(|message| MessageView::parse(message.get()))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(CopyError::InvalidView)?;
-            (replica, stored) = store(replica, views).await?;
+            (replica, stored) = storage::store(replica, views, None)
+                .await
+                .map_err(CopyError::Storage)?;
             report(ReplicaState::Copying { stored, total });
             if page.cursor == after {
                 break;
@@ -122,7 +118,9 @@ pub async fn copy_board(
         feed_cursor = after;
     }
 
-    report(ReplicaState::Copied { stored });
+    let (replica, _) = storage::store(replica, Vec::new(), Some(feed_cursor.clone()))
+        .await
+        .map_err(CopyError::Storage)?;
     Ok(CopiedBoard {
         replica,
         feed_cursor,
@@ -216,15 +214,4 @@ async fn read<Page: DeserializeOwned>(
         .map_err(CopyError::Request)?;
     let accepted_response = response.error_for_status().map_err(CopyError::Request)?;
     accepted_response.json().await.map_err(CopyError::Request)
-}
-
-async fn store(mut replica: Replica, views: Vec<MessageView>) -> Result<(Replica, u32), CopyError> {
-    tokio::task::spawn_blocking(move || {
-        replica.apply(&views)?;
-        let stored = replica.message_count()?;
-        Ok((replica, stored))
-    })
-    .await
-    .map_err(CopyError::StorageThread)?
-    .map_err(CopyError::Replica)
 }

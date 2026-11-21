@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use blossom::contract::{OpenBoard, ReplicaState};
 use blossom::replica::{Replica, replica_file};
-use blossom::{BoardAccess, OpenBoardFollower, copy_board};
+use blossom::{BoardAccess, OpenBoardFollower, Pacing, copy_board, follow_feed};
 use tauri::async_runtime::JoinHandle;
 use tauri::ipc::{Channel, IpcResponse};
 use tauri::webview::PageLoadEvent;
@@ -41,7 +41,7 @@ struct Session {
     replica_state: watch::Sender<Option<ReplicaState>>,
     following_open_board: RunningTask,
     forwarding_replica_state: RunningTask,
-    copying: RunningTask,
+    keeping_in_step: RunningTask,
 }
 
 impl Session {
@@ -52,22 +52,23 @@ impl Session {
             replica_state,
             following_open_board: RunningTask::default(),
             forwarding_replica_state: RunningTask::default(),
-            copying: RunningTask::default(),
+            keeping_in_step: RunningTask::default(),
         }
     }
 
-    fn start_copying(self: &Arc<Session>, access: BoardAccess) {
+    fn start_keeping_in_step(self: &Arc<Session>, access: BoardAccess) {
         let session = Arc::clone(self);
-        let copy = tauri::async_runtime::spawn(async move { session.copy(access).await });
-        self.copying.replace(copy);
+        let keeping =
+            tauri::async_runtime::spawn(async move { session.keep_in_step(access).await });
+        self.keeping_in_step.replace(keeping);
     }
 
-    fn stop_copying(&self) {
-        self.copying.stop();
+    fn stop_keeping_in_step(&self) {
+        self.keeping_in_step.stop();
         self.replica_state.send_replace(None);
     }
 
-    async fn copy(&self, access: BoardAccess) {
+    async fn keep_in_step(&self, access: BoardAccess) {
         let Some(replicas_folder) = self.replicas_folder.clone() else {
             eprintln!("blossom: there is no data folder to keep the replica in");
             return;
@@ -89,12 +90,26 @@ impl Session {
                 return;
             }
         };
-        let copied = copy_board(&access, replica, |state| {
+        let report_state = |state| {
             self.replica_state.send_replace(Some(state));
-        })
+        };
+        let copied = match copy_board(&access, replica, report_state).await {
+            Ok(copied) => copied,
+            Err(error) => {
+                eprintln!("blossom: the board could not be copied: {error}");
+                return;
+            }
+        };
+        let followed = follow_feed(
+            &access,
+            copied.replica,
+            copied.feed_cursor,
+            Pacing::for_the_app(),
+            report_state,
+        )
         .await;
-        if let Err(error) = copied {
-            eprintln!("blossom: the board could not be copied: {error}");
+        if let Err(error) = followed {
+            eprintln!("blossom: the board's feed could not be followed: {error}");
         }
     }
 }
@@ -121,8 +136,8 @@ async fn follow_open_board(channel: Channel<OpenBoard>, session: Arc<Session>) {
     loop {
         if let Some(open_board) = follower.look().await {
             match follower.access_to_open_board() {
-                Some(access) => session.start_copying(access.clone()),
-                None => session.stop_copying(),
+                Some(access) => session.start_keeping_in_step(access.clone()),
+                None => session.stop_keeping_in_step(),
             }
             if !send(&channel, open_board) {
                 return;

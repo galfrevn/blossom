@@ -117,10 +117,10 @@ test("when the board does not say its total, the status bar says how many are co
   expect(statusBar().getByText("Copying 42,000")).toBeDefined();
 });
 
-test("once the board is copied, the status bar says how many messages the replica holds", () => {
+test("while the replica follows the board, the status bar says how many messages it holds", () => {
   renderApplicationWhileTheCoreSays({
     openBoard: boardOfAda,
-    replicaState: { kind: "copied", stored: 100_006 },
+    replicaState: { kind: "live", stored: 100_006 },
   });
 
   expect(statusBar().getByText("100,006 messages")).toBeDefined();
@@ -129,8 +129,17 @@ test("once the board is copied, the status bar says how many messages the replic
 test("a replica of one message says so in the singular", () => {
   renderApplicationWhileTheCoreSays({
     openBoard: boardOfAda,
-    replicaState: { kind: "copied", stored: 1 },
+    replicaState: { kind: "live", stored: 1 },
   });
 
   expect(statusBar().getByText("1 message")).toBeDefined();
+});
+
+test("while the feed is reconnecting, the status bar says so", () => {
+  renderApplicationWhileTheCoreSays({
+    openBoard: boardOfAda,
+    replicaState: { kind: "reconnecting", stored: 100_006 },
+  });
+
+  expect(statusBar().getByText("Reconnecting")).toBeDefined();
 });

@@ -1,4 +1,7 @@
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use wiremock::matchers::{method, path_regex};
@@ -6,6 +9,8 @@ use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 pub const THREADS_PER_PAGE: usize = 2;
 pub const EVENTS_PER_PAGE: usize = 3;
+pub const FRAMES_PER_STREAM: usize = 2;
+const PAUSE_WHEN_CAUGHT_UP: Duration = Duration::from_millis(20);
 
 #[derive(Clone)]
 pub struct HistoryEvent {
@@ -135,6 +140,26 @@ impl BoardHistory {
         json!({ "channels": channels, "cursor": "channels", "next": Value::Null })
     }
 
+    fn events_stream(&self, after: &str) -> (String, Vec<usize>) {
+        let first = self.position_after(after);
+        let last = (first + FRAMES_PER_STREAM).min(self.events.len());
+        let mut body = format!(": connected\n\nid: {after}\n\n");
+        for (position, event) in self.events.iter().enumerate().take(last).skip(first) {
+            let cursor = Self::cursor_of(position);
+            if event.carries_a_message {
+                let data = json!({
+                    "cursor": cursor,
+                    "type": "message.posted",
+                    "message": event.message
+                });
+                body.push_str(&format!("id: {cursor}\nevent: board\ndata: {data}\n\n"));
+            } else {
+                body.push_str(&format!("id: {cursor}\n\n"));
+            }
+        }
+        (body, (first..last).collect())
+    }
+
     fn events_page(&self, after: &str) -> Value {
         let first = self.position_after(after);
         let last = (first + EVENTS_PER_PAGE).min(self.events.len());
@@ -157,24 +182,106 @@ impl BoardHistory {
     }
 }
 
+#[derive(Clone, Default)]
+pub struct FakeBoard {
+    pub history: Arc<Mutex<BoardHistory>>,
+    pub streams_to_refuse: Arc<AtomicUsize>,
+    pub streams_end_at_once: Arc<AtomicBool>,
+    pub stream_starts: Arc<Mutex<Vec<String>>>,
+    pub streamed_positions: Arc<Mutex<Vec<usize>>>,
+}
+
+impl FakeBoard {
+    pub fn with_history(history: BoardHistory) -> FakeBoard {
+        FakeBoard {
+            history: Arc::new(Mutex::new(history)),
+            ..FakeBoard::default()
+        }
+    }
+
+    pub fn change_history(&self, change: impl FnOnce(&mut BoardHistory)) {
+        let mut history = self
+            .history
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        change(&mut history);
+    }
+}
+
 struct HistoryResponder {
-    history: BoardHistory,
+    board: FakeBoard,
+}
+
+impl HistoryResponder {
+    fn respond_with_stream(&self, request: &Request) -> ResponseTemplate {
+        if self.board.streams_to_refuse.load(Ordering::SeqCst) > 0 {
+            self.board.streams_to_refuse.fetch_sub(1, Ordering::SeqCst);
+            return ResponseTemplate::new(503);
+        }
+        let Some(after) = request
+            .headers
+            .get("last-event-id")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+        else {
+            return ResponseTemplate::new(400);
+        };
+        self.board
+            .stream_starts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(after.clone());
+        if self.board.streams_end_at_once.load(Ordering::SeqCst) {
+            return ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(": connected\n\n");
+        }
+        let history = self
+            .board
+            .history
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (body, positions) = history.events_stream(&after);
+        let caught_up = positions.is_empty();
+        self.board
+            .streamed_positions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend(positions);
+        let response = ResponseTemplate::new(200)
+            .insert_header("content-type", "text/event-stream")
+            .set_body_string(body);
+        if caught_up {
+            return response.set_delay(PAUSE_WHEN_CAUGHT_UP);
+        }
+        response
+    }
 }
 
 impl Respond for HistoryResponder {
     fn respond(&self, request: &Request) -> ResponseTemplate {
+        let wants_a_stream = request
+            .headers
+            .get("accept")
+            .is_some_and(|value| value.as_bytes() == b"text/event-stream");
+        if request.url.path() == "/api/board/events" && wants_a_stream {
+            return self.respond_with_stream(request);
+        }
         let query: BTreeMap<String, String> = request
             .url
             .query_pairs()
             .map(|(key, value)| (key.into_owned(), value.into_owned()))
             .collect();
+        let history = self
+            .board
+            .history
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let body = match request.url.path() {
-            "/api/board/threads" => self
-                .history
-                .threads_page(query.get("before").map(String::as_str)),
-            "/api/board/channels" => self.history.channels_page(),
+            "/api/board/threads" => history.threads_page(query.get("before").map(String::as_str)),
+            "/api/board/channels" => history.channels_page(),
             "/api/board/events" => match query.get("after") {
-                Some(after) => self.history.events_page(after),
+                Some(after) => history.events_page(after),
                 None => return ResponseTemplate::new(400),
             },
             _ => return ResponseTemplate::new(404),
@@ -183,10 +290,10 @@ impl Respond for HistoryResponder {
     }
 }
 
-pub async fn serve_history(server: &MockServer, history: BoardHistory) {
+pub async fn serve_board(server: &MockServer, board: FakeBoard) {
     Mock::given(method("GET"))
         .and(path_regex("^/api/board/(threads|channels|events)$"))
-        .respond_with(HistoryResponder { history })
+        .respond_with(HistoryResponder { board })
         .mount(server)
         .await;
 }

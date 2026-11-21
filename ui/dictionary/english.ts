@@ -18,11 +18,12 @@ export const english = {
       }
       return `Copying ${count(stored)} of ${count(total)}`;
     },
-    copied: (stored: number) => {
+    live: (stored: number) => {
       if (stored === 1) {
         return "1 message";
       }
       return `${count(stored)} messages`;
     },
+    reconnecting: "Reconnecting",
   },
 };

@@ -94,7 +94,7 @@ On an Apple M3 Pro, against `vb serve` 0.54.0 holding 100,000 messages in 20 cha
 
 - **Only the per-channel read works on Vercel's board.** It costs the same as the board-wide read.
 - **The feed replay is the fastest on a local board,** but it runs oldest first, and it cannot reach past Vercel's 30 days.
-- **Live updates are fast.** A message posted while following over SSE arrived 38 to 39 ms after the post was sent, across five tries. Resuming with `Last-Event-ID` went on at the next event.
+- **Live updates are fast while the board is busy, and take up to 2 s after a quiet spell.** A message posted while following over SSE arrived 38 to 39 ms after the post was sent, across five tries in a row. `vb serve` reads its own log by polling it: every 25 ms while events flow, doubling with each empty poll up to 2 s (`idleCeilingMs` in its polling store). Posts three seconds apart reached a raw stream in about 180 ms, on an empty board and on the 100,000-message one alike, and the first post after a minute or more of quiet took 1.2 to 1.9 s, for `curl` as much as for Blossom. Resuming with `Last-Event-ID` went on at the next event.
 - **Writing the copy is cheap.** Storing all 100,000 views in SQLite from Rust, through `rusqlite` with SQLite bundled, took 0.9 s in one transaction, or 1.1 s with an FTS5 index on the text. The file held 98 MB of full views, or 121 MB with the index. The latest 50 messages of a channel read in 0.1 ms, a whole thread in 0.16 ms, and a phrase search in 0.2 ms.
 - **`vb serve` slows as its log grows.** Posting ran at 780 messages a second on an empty board and averaged 181 over the next 98,000.
 

@@ -4,10 +4,18 @@ import { dictionary } from "../dictionary";
 type BoardThatIsOpen = Extract<OpenBoard, { kind: "open" }>;
 
 function describeReplica(replicaState: ReplicaState): string {
-  if (replicaState.kind === "copying") {
-    return dictionary.status.copying(replicaState.stored, replicaState.total);
+  switch (replicaState.kind) {
+    case "copying":
+      return dictionary.status.copying(replicaState.stored, replicaState.total);
+    case "live":
+      return dictionary.status.live(replicaState.stored);
+    case "reconnecting":
+      return dictionary.status.reconnecting;
+    default: {
+      const stateWithoutText: never = replicaState;
+      return stateWithoutText;
+    }
   }
-  return dictionary.status.copied(replicaState.stored);
 }
 
 export function StatusBar({

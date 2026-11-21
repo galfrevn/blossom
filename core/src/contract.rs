@@ -32,5 +32,6 @@ pub enum OpenBoard {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ReplicaState {
     Copying { stored: u32, total: Option<u32> },
-    Copied { stored: u32 },
+    Live { stored: u32 },
+    Reconnecting { stored: u32 },
 }

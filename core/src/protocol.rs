@@ -3,11 +3,19 @@ use std::time::Duration;
 use reqwest::Client;
 use reqwest::redirect::Policy;
 use serde::Deserialize;
+use serde_json::value::RawValue;
 
 use crate::access::BoardAccess;
 use crate::contract::Person;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+const SILENCE_THAT_ENDS_A_STREAM: Duration = Duration::from_secs(45);
+
+#[derive(Deserialize)]
+pub(crate) struct FeedEvent {
+    pub(crate) message: Option<Box<RawValue>>,
+}
 
 #[derive(Deserialize)]
 struct Discovery {
@@ -23,6 +31,16 @@ struct Me {
 pub fn client() -> Option<Client> {
     Client::builder()
         .timeout(REQUEST_TIMEOUT)
+        .no_proxy()
+        .redirect(Policy::none())
+        .build()
+        .ok()
+}
+
+pub fn streaming_client() -> Option<Client> {
+    Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(SILENCE_THAT_ENDS_A_STREAM)
         .no_proxy()
         .redirect(Policy::none())
         .build()

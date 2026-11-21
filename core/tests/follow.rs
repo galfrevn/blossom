@@ -1,7 +1,7 @@
 mod support;
 
-use blossom::OpenBoardFollower;
 use blossom::contract::{OpenBoard, Person};
+use blossom::{BoardAccess, OpenBoardFollower};
 use support::{answer_discovery_naming, answer_me, start_fake_board, write_token_file};
 use tempfile::TempDir;
 use wiremock::MockServer;
@@ -202,4 +202,48 @@ async fn the_follower_keeps_the_open_boards_access_for_copying_it() {
 
     assert_eq!(url_while_open, Some(board.url.clone()));
     assert!(follower.access_to_open_board().is_none());
+}
+
+#[tokio::test]
+async fn a_board_that_restarts_with_a_new_token_is_reported_again_with_its_new_access() {
+    let board = start_fake_board("token-of-ada", "ada", "Ada Lovelace").await;
+    let token_folder = TempDir::new().unwrap();
+    write_token_file(
+        token_folder.path(),
+        "board.json",
+        &board.url,
+        "token-of-ada",
+        5,
+    )
+    .unwrap();
+    let mut follower = OpenBoardFollower::new(token_folder.path().to_path_buf());
+    follower.look().await;
+
+    board.server.reset().await;
+    answer_discovery_naming(&board.server, &board.url).await;
+    answer_me(
+        &board.server,
+        "token-of-ada-after-restart",
+        "ada",
+        "Ada Lovelace",
+    )
+    .await;
+    write_token_file(
+        token_folder.path(),
+        "board.json",
+        &board.url,
+        "token-of-ada-after-restart",
+        0,
+    )
+    .unwrap();
+
+    assert_eq!(
+        follower.look().await,
+        Some(OpenBoard::Open {
+            url: board.url.clone(),
+            person: ada(),
+        })
+    );
+    let access_after_restart = BoardAccess::new(&board.url, "token-of-ada-after-restart");
+    assert!(follower.access_to_open_board() == Some(&access_after_restart));
 }

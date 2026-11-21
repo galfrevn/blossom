@@ -60,7 +60,7 @@ fn the_replica_counts_each_message_once_however_many_views_of_it_arrive() {
         ])
         .unwrap();
 
-    assert_eq!(replica.message_count().unwrap(), 2);
+    assert_eq!(replica.message_count(), 2);
 }
 
 #[test]
@@ -75,7 +75,7 @@ fn what_the_replica_holds_survives_reopening_it() {
 
     let reopened = Replica::open(&file).unwrap();
 
-    assert_eq!(reopened.message_count().unwrap(), 1);
+    assert_eq!(reopened.message_count(), 1);
     assert_eq!(
         reopened.stored_view("812").unwrap().unwrap()["text"],
         "deploy failed"
@@ -93,4 +93,52 @@ fn each_board_address_gets_a_replica_file_of_its_own_in_the_folder() {
     assert_eq!(first_file.parent(), Some(folder.path()));
     assert_eq!(first_file, replica_file(folder.path(), &first));
     assert_ne!(first_file, replica_file(folder.path(), &second));
+}
+
+#[test]
+fn the_feed_cursor_is_kept_with_the_views_it_came_with_across_reopening() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    assert_eq!(replica.feed_cursor().unwrap(), None);
+
+    replica
+        .apply_from_feed(&[view("812", 812, "deploy failed").unwrap()], "812")
+        .unwrap();
+    replica
+        .apply_from_feed(&[view("813", 813, "looking").unwrap()], "815")
+        .unwrap();
+    drop(replica);
+    let reopened = Replica::open(&file).unwrap();
+
+    assert_eq!(reopened.feed_cursor().unwrap(), Some(String::from("815")));
+    assert_eq!(reopened.message_count(), 2);
+}
+
+#[test]
+fn the_count_takes_only_messages_it_has_not_held_before() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+
+    replica
+        .apply(&[
+            view("812", 812, "deploy failed").unwrap(),
+            view("813", 813, "looking").unwrap(),
+            view("812", 815, "deploy failed, rolled back").unwrap(),
+            view("813", 811, "an older look").unwrap(),
+            view("812", 815, "deploy failed, rolled back").unwrap(),
+        ])
+        .unwrap();
+    replica
+        .apply_from_feed(&[view("813", 820, "found it").unwrap()], "820")
+        .unwrap();
+    replica
+        .apply_from_feed(&[view("814", 821, "fixed").unwrap()], "821")
+        .unwrap();
+    let counted_while_open = replica.message_count();
+    drop(replica);
+
+    assert_eq!(counted_while_open, 3);
+    assert_eq!(Replica::open(&file).unwrap().message_count(), 3);
 }

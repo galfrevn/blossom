@@ -1,10 +1,13 @@
 mod access;
 pub mod contract;
 mod copy;
+mod feed;
 mod follow;
 mod local;
 mod protocol;
 pub mod replica;
+pub mod sse;
+mod storage;
 
 use std::path::Path;
 
@@ -12,8 +15,10 @@ use contract::{OpenBoard, Person};
 
 pub use access::BoardAccess;
 pub use copy::{CopiedBoard, CopyError, copy_board};
+pub use feed::{FollowError, Pacing, follow_feed};
 pub use follow::OpenBoardFollower;
 pub use local::{token_folder, token_folder_from_environment};
+pub use storage::StorageError;
 
 pub async fn find_open_board(token_folder: &Path) -> OpenBoard {
     match find_board(token_folder).await {
