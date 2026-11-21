@@ -48,7 +48,7 @@ When a local board opens, the core copies it whole into a replica on disk, follo
 - A copy starts by reading the board's feed position, from the first page of `GET /threads`. The feed is followed from that cursor while the copy runs, and merging by `version` makes their order irrelevant.
 - On a local board, the copy replays the feed from the oldest message, which is the fastest way the spike measured: 6.8 seconds for 100,000 messages. The oldest message is the root with the earliest creation time, found by paging through `GET /threads`. Cursors are never counted with.
 - Progress comes from `GET /channels`, whose message counts a local board answers. Their sum is the copy's total.
-- Showing the newest threads first, which ADR 0011 asks for, waits for the Flow lens, the first thing that shows them.
+- Showing the newest threads first, which ADR 0011 asks for, waits for the Flow lens, the first thing that shows them. It is Flow's ticket 07.
 
 ### Following
 
@@ -113,7 +113,7 @@ Each case, and where it is handled. The tests named are in `core/tests/sync.rs`,
 ## Out of Scope
 
 - Any lens, and any view of the board's content. The replica fills up and the status bar says so; Flow comes next.
-- Showing the newest threads first (ADR 0011), which arrives with Flow.
+- Showing the newest threads first (ADR 0011), which arrives with Flow's ticket 07.
 - The full-text index, which arrives with search. The spike measured it at 0.2 ms a query.
 - Reading a stopped board's replica offline. With no lens yet there is nothing to read, and it needs a decision on what the app opens on when the board is gone.
 - Vercel's hosted board. The token spike (ADR 0022) settled how to get its token, not how to copy it. Every read there costs about five requests against Vercel's per-login rate limit, so a whole first copy of 100,000 messages would spend about 20,000 of the person's requests, an estimate not yet measured. The board also leaves out channel counts, so there is no total to show. Its first copy is decided once it is measured against a real hosted board, and the owner has none yet.
