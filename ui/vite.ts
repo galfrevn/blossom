@@ -15,5 +15,8 @@ export default defineConfig({
   test: {
     environment: "happy-dom",
     include: ["**/tests/**/*.{ts,tsx}"],
+    sequence: {
+      shuffle: true,
+    },
   },
 });
