@@ -9,6 +9,7 @@ mod keeping;
 mod local;
 mod pacing;
 mod protocol;
+pub mod reader;
 pub mod replica;
 pub mod sse;
 mod storage;

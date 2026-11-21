@@ -26,6 +26,7 @@ pub async fn keep_in_step(
     access: &BoardAccess,
     replicas_folder: &Path,
     pacing: Pacing,
+    mut announce_replica: impl FnMut(&Path),
     mut report: impl FnMut(ReplicaState),
 ) -> KeepingEnded {
     let last_stored = AtomicU32::new(0);
@@ -33,7 +34,14 @@ pub async fn keep_in_step(
         last_stored.store(state.stored(), Ordering::Relaxed);
         report(state);
     };
-    let interrupted = keep(access, replicas_folder, pacing, &mut report_and_remember).await;
+    let interrupted = keep(
+        access,
+        replicas_folder,
+        pacing,
+        &mut announce_replica,
+        &mut report_and_remember,
+    )
+    .await;
     match interrupted {
         Interrupted::BoardGone => KeepingEnded::BoardGone,
         Interrupted::Failed {
@@ -100,6 +108,7 @@ async fn keep(
     access: &BoardAccess,
     replicas_folder: &Path,
     pacing: Pacing,
+    announce_replica: &mut impl FnMut(&Path),
     report: &mut impl FnMut(ReplicaState),
 ) -> Interrupted {
     loop {
@@ -116,6 +125,7 @@ async fn keep(
                 Err(interrupted) => return interrupted,
             },
         };
+        announce_replica(&start.file);
         let followed: Result<Infallible, FollowError> = follow_feed(
             access,
             start.replica,

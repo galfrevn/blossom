@@ -7,4 +7,5 @@ export type Core = {
   subscribeToReplica: (
     listener: (replicaState: ReplicaState) => void,
   ) => () => void;
+  subscribeToChannels: (listener: (channels: string[]) => void) => () => void;
 };

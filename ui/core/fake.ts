@@ -27,17 +27,21 @@ export type FakeCore = {
   core: Core;
   pushOpenBoard: (openBoard: OpenBoard) => void;
   pushReplicaState: (replicaState: ReplicaState) => void;
+  pushChannels: (channels: string[]) => void;
 };
 
 export function createFakeCore(): FakeCore {
   const openBoard = createFakeSubscription<OpenBoard>();
   const replica = createFakeSubscription<ReplicaState>();
+  const channels = createFakeSubscription<string[]>();
   return {
     core: {
       subscribeToOpenBoard: openBoard.subscribe,
       subscribeToReplica: replica.subscribe,
+      subscribeToChannels: channels.subscribe,
     },
     pushOpenBoard: openBoard.push,
     pushReplicaState: replica.push,
+    pushChannels: channels.push,
   };
 }

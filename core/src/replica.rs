@@ -169,6 +169,16 @@ impl Replica {
                  only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
                  cursor TEXT NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS channels (
+                 path TEXT PRIMARY KEY
+             ) WITHOUT ROWID;
+             CREATE TRIGGER IF NOT EXISTS channel_of_a_new_message AFTER INSERT ON messages
+             BEGIN
+                 INSERT OR IGNORE INTO channels (path) VALUES (new.channel);
+             END;
+             INSERT OR IGNORE INTO channels (path)
+                 SELECT DISTINCT channel FROM messages
+                 WHERE NOT EXISTS (SELECT 1 FROM channels);
              CREATE TABLE IF NOT EXISTS board (
                  only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
                  oldest_id TEXT NOT NULL,

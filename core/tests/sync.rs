@@ -411,9 +411,15 @@ fn keep_in_step_in(
     let replicas_folder = replicas_folder.to_path_buf();
     let (sender, states) = unbounded_channel();
     let task = tokio::spawn(async move {
-        keep_in_step(&access, &replicas_folder, quick_pacing(), |state| {
-            sender.send(state).ok();
-        })
+        keep_in_step(
+            &access,
+            &replicas_folder,
+            quick_pacing(),
+            |_| {},
+            |state| {
+                sender.send(state).ok();
+            },
+        )
         .await
     });
     (states, task)
@@ -531,9 +537,15 @@ async fn a_replica_that_cannot_be_opened_stops_and_says_so() {
     let access = BoardAccess::new("http://127.0.0.1:9/api/board", "token-of-ada");
     let mut reported_states = Vec::new();
 
-    let ended = keep_in_step(&access, &replicas_folder, quick_pacing(), |state| {
-        reported_states.push(state);
-    })
+    let ended = keep_in_step(
+        &access,
+        &replicas_folder,
+        quick_pacing(),
+        |_| {},
+        |state| {
+            reported_states.push(state);
+        },
+    )
     .await;
 
     assert!(matches!(ended, KeepingEnded::Stopped(_)));
@@ -708,4 +720,36 @@ async fn a_cursor_refused_right_after_a_copy_stops_instead_of_copying_in_a_loop(
     assert!(until_reported(&mut keeping.states, &stopped).await);
     let ended = until_ended(keeping.task).await;
     assert!(matches!(ended, Some(KeepingEnded::Stopped(_))));
+}
+
+#[tokio::test]
+async fn the_replica_being_kept_is_announced_once_it_is_named_after_its_board() {
+    let board = FakeBoard::with_history(history_across_two_channels());
+    let server = MockServer::builder().start().await;
+    serve_board(&server, board.clone()).await;
+    let folder = TempDir::new().unwrap();
+    let access = BoardAccess::new(format!("{}/api/board", server.uri()), "token-of-ada");
+    let replicas_folder = folder.path().to_path_buf();
+    let (sender, mut announced) = unbounded_channel();
+    let task = tokio::spawn(async move {
+        keep_in_step(
+            &access,
+            &replicas_folder,
+            quick_pacing(),
+            |file| {
+                sender.send(file.to_path_buf()).ok();
+            },
+            |_| {},
+        )
+        .await
+    });
+
+    let announced_file = tokio::time::timeout(Duration::from_secs(5), announced.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    task.abort();
+
+    let files = replica_files(folder.path()).unwrap();
+    assert_eq!(files, vec![announced_file]);
 }

@@ -25,9 +25,14 @@ if (rootElement === null) {
 const core = coreForThisWindow();
 const openBoardStore = createStore(core.subscribeToOpenBoard);
 const replicaStore = createStore(core.subscribeToReplica);
+const channelsStore = createStore(core.subscribeToChannels);
 
 createRoot(rootElement).render(
   <StrictMode>
-    <Application openBoardStore={openBoardStore} replicaStore={replicaStore} />
+    <Application
+      openBoardStore={openBoardStore}
+      replicaStore={replicaStore}
+      channelsStore={channelsStore}
+    />
   </StrictMode>,
 );

@@ -16,20 +16,33 @@ const boardOfAda: OpenBoard = {
 function renderApplicationWhileTheCoreSays(said: {
   openBoard?: OpenBoard;
   replicaState?: ReplicaState;
+  channels?: string[];
 }) {
   const fakeCore = createFakeCore();
   const openBoardStore = createStore(fakeCore.core.subscribeToOpenBoard);
   const replicaStore = createStore(fakeCore.core.subscribeToReplica);
+  const channelsStore = createStore(fakeCore.core.subscribeToChannels);
   if (said.openBoard !== undefined) {
     fakeCore.pushOpenBoard(said.openBoard);
   }
   if (said.replicaState !== undefined) {
     fakeCore.pushReplicaState(said.replicaState);
   }
+  if (said.channels !== undefined) {
+    fakeCore.pushChannels(said.channels);
+  }
   render(
-    <Application openBoardStore={openBoardStore} replicaStore={replicaStore} />,
+    <Application
+      openBoardStore={openBoardStore}
+      replicaStore={replicaStore}
+      channelsStore={channelsStore}
+    />,
   );
   return fakeCore;
+}
+
+function sidebar() {
+  return within(screen.getByRole("complementary"));
 }
 
 function statusBar() {
@@ -166,4 +179,88 @@ test("when the board sends what the core cannot read, the status bar says so", (
   });
 
   expect(statusBar().getByText("Stopped: can't read the board")).toBeDefined();
+});
+
+test("with a board open, the sidebar lists the Flow lens, chosen", () => {
+  renderApplicationWhileTheCoreSays({ openBoard: boardOfAda, channels: [] });
+
+  const lenses = within(sidebar().getByRole("list", { name: "Lenses" }));
+
+  expect(
+    lenses
+      .getByText("Flow")
+      .closest("[aria-current]")
+      ?.getAttribute("aria-current"),
+  ).toBe("page");
+});
+
+test("the sidebar lists the board's channels as a tree", () => {
+  renderApplicationWhileTheCoreSays({
+    openBoard: boardOfAda,
+    channels: ["fleet/api", "fleet/www", "general"],
+  });
+
+  const channels = within(sidebar().getByRole("list", { name: "Channels" }));
+  const rows = channels.getAllByRole("listitem").map((row) => ({
+    name: row.textContent,
+    depth: row.getAttribute("data-depth"),
+  }));
+
+  expect(rows).toEqual([
+    { name: "fleet", depth: "0" },
+    { name: "#api", depth: "1" },
+    { name: "#www", depth: "1" },
+    { name: "#general", depth: "0" },
+  ]);
+});
+
+test("a channel that also holds channels is listed once, as a channel", () => {
+  renderApplicationWhileTheCoreSays({
+    openBoard: boardOfAda,
+    channels: ["fleet", "fleet/www"],
+  });
+
+  const channels = within(sidebar().getByRole("list", { name: "Channels" }));
+
+  expect(
+    channels.getAllByRole("listitem").map((row) => row.textContent),
+  ).toEqual(["#fleet", "#www"]);
+});
+
+test("the sidebar follows the board's channels as they appear", () => {
+  const fakeCore = renderApplicationWhileTheCoreSays({
+    openBoard: boardOfAda,
+    channels: ["general"],
+  });
+
+  act(() => fakeCore.pushChannels(["fleet/docs", "general"]));
+
+  const channels = within(sidebar().getByRole("list", { name: "Channels" }));
+  expect(channels.getByText("#docs")).toBeDefined();
+});
+
+test("the lens says what it shows", () => {
+  renderApplicationWhileTheCoreSays({ openBoard: boardOfAda, channels: [] });
+
+  expect(screen.getByRole("heading", { name: "Flow" })).toBeDefined();
+  expect(screen.getByText("Everything on the board, in order.")).toBeDefined();
+});
+
+test("with no board running, there is no sidebar", () => {
+  renderApplicationWhileTheCoreSays({ openBoard: { kind: "noneRunning" } });
+
+  expect(screen.queryByRole("complementary")).toBeNull();
+});
+
+test("channels are listed in natural order, so area2 comes before area10", () => {
+  renderApplicationWhileTheCoreSays({
+    openBoard: boardOfAda,
+    channels: ["fleet/area1", "fleet/area10", "fleet/area2"],
+  });
+
+  const channels = within(sidebar().getByRole("list", { name: "Channels" }));
+
+  expect(
+    channels.getAllByRole("listitem").map((row) => row.textContent),
+  ).toEqual(["fleet", "#area1", "#area2", "#area10"]);
 });

@@ -31,11 +31,9 @@ The window gains the concept's frame. Flow lists every message on the board olde
 
 ### The frame
 
-- The window follows the fourth concept: a title bar with the board's name and the finder's box, a sidebar of 212 px with the lenses and the channel tree, the lens with its header (title and one sentence), a detail pane that opens on a selection, and the status bar that exists.
+- The window follows the fourth concept: a sidebar of 212 px with the lenses and the channel tree, the lens with its header (title and one sentence), and the status bar that exists. The detail pane comes with the thread spec, and the finder's box with the search spec, so that nothing is drawn before it works.
 - The sidebar lists only the lenses that are built. Flow is the first; Attention, Tasks and Fleet join as their specs land.
-- The channel tree comes from the replica: every channel with messages, nested by `/`, each with its message count.
-- The detail pane opens when a line is selected and is empty until the thread spec fills it. Esc closes it.
-- The finder's box in the title bar is drawn and inert until the search spec.
+- The channel tree comes from the replica: every channel with messages, nested by `/`, in natural order. The shell reads it through a read-only connection to the replica that `keep_in_step` announces.
 
 ### Order and windows
 

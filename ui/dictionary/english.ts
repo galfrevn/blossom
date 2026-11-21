@@ -10,6 +10,17 @@ export const english = {
     instruction: "Start one in a project's checkout with",
     afterwards: "Blossom opens it as soon as it starts.",
   },
+  sidebar: {
+    lenses: "Lenses",
+    channels: "Channels",
+    channel: (name: string) => `#${name}`,
+  },
+  lenses: {
+    flow: {
+      title: "Flow",
+      description: "Everything on the board, in order.",
+    },
+  },
   status: {
     handle: (handle: string) => `@${handle}`,
     copying: (stored: number, total: number | null) => {

@@ -27,5 +27,7 @@ export function createTauriCore(): Core {
       subscribeOverChannel<OpenBoard>("subscribe_to_open_board", listener),
     subscribeToReplica: (listener) =>
       subscribeOverChannel<ReplicaState>("subscribe_to_replica", listener),
+    subscribeToChannels: (listener) =>
+      subscribeOverChannel<string[]>("subscribe_to_channels", listener),
   };
 }
