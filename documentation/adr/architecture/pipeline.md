@@ -22,7 +22,7 @@ One person pushes straight to `main`, so CI is the only thing between a commit a
 | Job | Budget, warm | Timeout |
 | --- | --- | --- |
 | `linux`: conventions, core and UI | 70 s | 3 min |
-| `desktop`: Clippy on the shell | 60 s | 3 min |
+| `desktop`: Clippy on the shell | 50 s | 3 min |
 | `installer`: the disk image | 150 s | 8 min |
 
 A budget is measured from the job's first step to its last check, and it is about 1.3 times the slowest warm run measured. A timeout is about 1.5 times the slowest cold run, rounded up to whole minutes. Neither is raised to make a run pass. The measurements are in `.scratch/pipeline/issues/07.md`.

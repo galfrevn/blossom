@@ -71,7 +71,7 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: clippy
       - run: cargo clippy --package desktop --all-targets --quiet -- --deny warnings
-      - run: sh budgets.sh time desktop 60
+      - run: sh budgets.sh time desktop 50
         env:
           RUST_CACHE_FULL_MATCH: ${{ steps.rust.outputs.cache-hit }}
 
