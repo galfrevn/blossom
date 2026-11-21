@@ -4,6 +4,7 @@ import type {
   FlowWindow,
   OpenBoard,
   ReplicaState,
+  SearchResults,
   Thread,
 } from "./contract";
 
@@ -23,4 +24,5 @@ export type Core = {
     count: number,
   ) => Promise<FlowWindow>;
   readThread: (messageId: string) => Promise<Thread | null>;
+  search: (query: string) => Promise<SearchResults>;
 };

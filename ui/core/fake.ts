@@ -5,6 +5,7 @@ import type {
   FlowRow,
   OpenBoard,
   ReplicaState,
+  SearchResults,
   Thread,
 } from "./contract";
 
@@ -44,6 +45,10 @@ function threadHolding(threads: Thread[], messageId: string): Thread | null {
   return holding ?? null;
 }
 
+function noSearchResults(): SearchResults {
+  return { messages: [], tasks: [], channels: [], agents: [] };
+}
+
 export type FakeCore = {
   core: Core;
   pushOpenBoard: (openBoard: OpenBoard) => void;
@@ -52,6 +57,7 @@ export type FakeCore = {
   pushFlow: (rows: FlowRow[]) => void;
   pushThreads: (threads: Thread[]) => void;
   pushFleet: (agents: Agent[]) => void;
+  answerSearch: (query: string, results: SearchResults) => void;
 };
 
 export function createFakeCore(): FakeCore {
@@ -67,6 +73,7 @@ export function createFakeCore(): FakeCore {
     flowRevision += 1;
     flow.push({ revision: flowRevision });
   };
+  const searchAnswers = new Map<string, SearchResults>();
   return {
     core: {
       subscribeToOpenBoard: openBoard.subscribe,
@@ -86,6 +93,8 @@ export function createFakeCore(): FakeCore {
       },
       readThread: (messageId) =>
         Promise.resolve(threadHolding(threads, messageId)),
+      search: (query) =>
+        Promise.resolve(searchAnswers.get(query) ?? noSearchResults()),
     },
     pushOpenBoard: openBoard.push,
     pushReplicaState: replica.push,
@@ -99,5 +108,8 @@ export function createFakeCore(): FakeCore {
       announceTheChange();
     },
     pushFleet: fleet.push,
+    answerSearch: (query, results) => {
+      searchAnswers.set(query, results);
+    },
   };
 }

@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "subscribe_to_fleet",
         "read_flow",
         "read_thread",
+        "search",
     ]);
     tauri_build::try_build(Attributes::new().app_manifest(app_manifest))?;
     Ok(())

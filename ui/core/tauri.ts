@@ -6,6 +6,7 @@ import type {
   FlowWindow,
   OpenBoard,
   ReplicaState,
+  SearchResults,
   Thread,
 } from "./contract";
 
@@ -44,5 +45,6 @@ export function createTauriCore(): Core {
       invoke<FlowWindow>("read_flow", { channel, start, count }),
     readThread: (messageId) =>
       invoke<Thread | null>("read_thread", { messageId }),
+    search: (query) => invoke<SearchResults>("search", { query }),
   };
 }

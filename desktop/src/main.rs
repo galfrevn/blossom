@@ -6,7 +6,9 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
-use blossom::contract::{Agent, FlowChange, FlowWindow, OpenBoard, ReplicaState, Thread};
+use blossom::contract::{
+    Agent, FlowChange, FlowWindow, OpenBoard, ReplicaState, SearchResults, Thread,
+};
 use blossom::reader::ReplicaReader;
 use blossom::time::board_time;
 use blossom::{BoardAccess, KeepingEnded, OpenBoardFollower, Pacing, keep_in_step};
@@ -195,6 +197,14 @@ impl Session {
             .map_err(|error| error.to_string())
     }
 
+    fn search(&self, query: &str) -> Result<SearchResults, String> {
+        let reader = self.reader.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(reader) = reader.as_ref() else {
+            return Err(String::from("no replica is open"));
+        };
+        reader.search(query).map_err(|error| error.to_string())
+    }
+
     async fn keep_in_step(&self, access: BoardAccess) {
         let Some(replicas_folder) = self.replicas_folder.as_deref() else {
             eprintln!("blossom: there is no data folder to keep the replica in");
@@ -249,6 +259,12 @@ fn read_flow(
 ) -> Result<FlowWindow, String> {
     session.read_flow(channel.as_deref(), start, count)
 }
+
+#[tauri::command(async)]
+fn search(query: String, session: State<'_, Arc<Session>>) -> Result<SearchResults, String> {
+    session.search(&query)
+}
+
 #[tauri::command]
 fn read_thread(
     message_id: String,
@@ -351,7 +367,8 @@ fn main() -> ExitCode {
             subscribe_to_flow,
             subscribe_to_fleet,
             read_flow,
-            read_thread
+            read_thread,
+            search
         ])
         .on_page_load(|webview, payload| {
             if payload.event() != PageLoadEvent::Finished {

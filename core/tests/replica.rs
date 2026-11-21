@@ -908,3 +908,21 @@ fn an_edit_that_adds_a_mention_makes_a_reply_no_longer_plain() {
 
     assert!(!stored_facts_of(&folder, "2").unwrap().plain_agent_reply);
 }
+
+#[test]
+fn a_replica_made_before_messages_were_searchable_is_not_opened() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let earlier_replica = rusqlite::Connection::open(&file).unwrap();
+    earlier_replica
+        .execute_batch(
+            "CREATE TABLE messages (id TEXT PRIMARY KEY) WITHOUT ROWID;
+             PRAGMA user_version = 1;",
+        )
+        .unwrap();
+    drop(earlier_replica);
+
+    let opened = Replica::open(&file);
+
+    assert!(matches!(opened, Err(ReplicaError::AnotherSchemaVersion(1))));
+}

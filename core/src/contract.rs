@@ -16,6 +16,12 @@ pub fn typescript() -> String {
         Thread::decl(&configuration),
         HeldTask::decl(&configuration),
         Agent::decl(&configuration),
+        TextPart::decl(&configuration),
+        FoundMessage::decl(&configuration),
+        FoundTask::decl(&configuration),
+        FoundChannel::decl(&configuration),
+        FoundAgent::decl(&configuration),
+        SearchResults::decl(&configuration),
     ];
     declarations
         .iter()
@@ -124,6 +130,30 @@ pub struct HeldTask {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+pub struct TextPart {
+    pub text: String,
+    pub marked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct FoundMessage {
+    pub id: String,
+    pub channel: String,
+    pub author: String,
+    pub created_at: String,
+    pub snippet: Vec<TextPart>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+pub struct FoundTask {
+    pub id: String,
+    pub channel: String,
+    pub state: String,
+    pub snippet: Vec<TextPart>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
     pub id: String,
@@ -133,4 +163,27 @@ pub struct Agent {
     pub lapsed: bool,
     pub failed_recently: bool,
     pub channel: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct FoundChannel {
+    pub path: String,
+    pub marked_path: Vec<TextPart>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct FoundAgent {
+    pub id: String,
+    pub marked_name: Vec<TextPart>,
+    pub marked_handle: Vec<TextPart>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, TS)]
+pub struct SearchResults {
+    pub messages: Vec<FoundMessage>,
+    pub tasks: Vec<FoundTask>,
+    pub channels: Vec<FoundChannel>,
+    pub agents: Vec<FoundAgent>,
 }

@@ -212,7 +212,7 @@ impl From<rusqlite::Error> for ReplicaError {
 
 const WAIT_FOR_ANOTHER_CONNECTION: Duration = Duration::from_secs(2);
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 const SCHEMA: &str = "
     CREATE TABLE messages (
@@ -297,6 +297,87 @@ const SCHEMA: &str = "
     CREATE TABLE unlisted_actors (
         id TEXT PRIMARY KEY
     ) WITHOUT ROWID;
+    CREATE INDEX arrivals_by_message ON arrivals (id);
+    CREATE VIEW searchable_messages AS
+        SELECT arrivals.sequence AS sequence,
+               messages.id AS id,
+               iif(
+                   json_extract(messages.view, '$.deleted'),
+                   NULL,
+                   json_extract(messages.view, '$.text')
+               ) AS text
+        FROM arrivals JOIN messages ON messages.id = arrivals.id;
+    CREATE VIEW searchable_tasks AS
+        SELECT searchable_messages.sequence AS sequence,
+               searchable_messages.id AS id,
+               searchable_messages.text AS text
+        FROM tasks JOIN searchable_messages ON searchable_messages.id = tasks.id;
+    CREATE VIRTUAL TABLE message_words USING fts5 (
+        text,
+        content = 'searchable_messages',
+        content_rowid = 'sequence',
+        tokenize = 'unicode61 remove_diacritics 2'
+    );
+    CREATE VIRTUAL TABLE task_words USING fts5 (
+        text,
+        content = 'searchable_tasks',
+        content_rowid = 'sequence',
+        tokenize = 'unicode61 remove_diacritics 2'
+    );
+    CREATE VIRTUAL TABLE channel_words USING fts5 (
+        path,
+        tokenize = 'unicode61 remove_diacritics 2'
+    );
+    CREATE VIRTUAL TABLE agent_words USING fts5 (
+        id UNINDEXED,
+        name,
+        handle,
+        tokenize = 'unicode61 remove_diacritics 2'
+    );
+    CREATE TRIGGER words_of_an_arrival AFTER INSERT ON arrivals
+    BEGIN
+        INSERT INTO message_words (rowid, text)
+        SELECT sequence, text FROM searchable_messages WHERE sequence = new.sequence;
+    END;
+    CREATE TRIGGER words_of_a_new_task AFTER INSERT ON tasks
+    BEGIN
+        INSERT INTO task_words (rowid, text)
+        SELECT sequence, text FROM searchable_tasks WHERE id = new.id;
+    END;
+    CREATE TRIGGER words_before_an_edit BEFORE UPDATE OF view ON messages
+    WHEN json_extract(old.view, '$.text') IS NOT json_extract(new.view, '$.text')
+        OR json_extract(old.view, '$.deleted') IS NOT json_extract(new.view, '$.deleted')
+    BEGIN
+        INSERT INTO message_words (message_words, rowid, text)
+        SELECT 'delete', sequence, text FROM searchable_messages WHERE id = old.id;
+        INSERT INTO task_words (task_words, rowid, text)
+        SELECT 'delete', sequence, text FROM searchable_tasks WHERE id = old.id;
+    END;
+    CREATE TRIGGER words_after_an_edit AFTER UPDATE OF view ON messages
+    WHEN json_extract(old.view, '$.text') IS NOT json_extract(new.view, '$.text')
+        OR json_extract(old.view, '$.deleted') IS NOT json_extract(new.view, '$.deleted')
+    BEGIN
+        INSERT INTO message_words (rowid, text)
+        SELECT sequence, text FROM searchable_messages WHERE id = new.id;
+        INSERT INTO task_words (rowid, text)
+        SELECT sequence, text FROM searchable_tasks WHERE id = new.id;
+    END;
+    CREATE TRIGGER words_of_a_new_channel AFTER INSERT ON channels
+    BEGIN
+        INSERT INTO channel_words (path) VALUES (new.path);
+    END;
+    CREATE TRIGGER words_of_a_new_agent AFTER INSERT ON actors
+    WHEN new.kind = 'agent'
+    BEGIN
+        INSERT INTO agent_words (id, name, handle) VALUES (new.id, new.name, new.handle);
+    END;
+    CREATE TRIGGER words_of_a_changed_actor AFTER UPDATE ON actors
+    WHEN old.kind IS NOT new.kind OR old.name IS NOT new.name OR old.handle IS NOT new.handle
+    BEGIN
+        DELETE FROM agent_words WHERE id = old.id;
+        INSERT INTO agent_words (id, name, handle)
+        SELECT new.id, new.name, new.handle WHERE new.kind = 'agent';
+    END;
 ";
 
 fn make_or_check_the_schema(connection: &mut Connection) -> Result<(), ReplicaError> {

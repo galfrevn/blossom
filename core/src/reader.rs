@@ -1,6 +1,7 @@
 mod fleet;
 mod lines;
 mod numbers;
+mod search;
 mod thread;
 
 use std::cell::RefCell;
@@ -10,7 +11,7 @@ use std::path::Path;
 use rusqlite::types::Type;
 use rusqlite::{CachedStatement, Connection, OpenFlags, Row, params};
 
-use crate::contract::{Agent, FlowFold, FlowRow, FlowWindow};
+use crate::contract::{Agent, FlowFold, FlowRow, FlowWindow, SearchResults};
 use crate::replica::ReplicaError;
 use lines::{Line, OrderedMessage, lines_of};
 use numbers::Numbers;
@@ -104,6 +105,10 @@ impl ReplicaReader {
         self.connection
             .is_readonly(rusqlite::MAIN_DB)
             .unwrap_or(false)
+    }
+
+    pub fn search(&self, query: &str) -> Result<SearchResults, ReplicaError> {
+        Ok(search::search(&self.connection, query)?)
     }
 
     pub fn channels(&self) -> Result<Vec<String>, ReplicaError> {

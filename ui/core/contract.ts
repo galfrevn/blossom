@@ -21,3 +21,15 @@ export type Thread = { id: string, channel: string, messages: Array<ThreadMessag
 export type HeldTask = { task: string, until: string, };
 
 export type Agent = { id: string, name: string, onBehalfOf: string | null, holds: HeldTask | null, lapsed: boolean, failedRecently: boolean, channel: string | null, };
+
+export type TextPart = { text: string, marked: boolean, };
+
+export type FoundMessage = { id: string, channel: string, author: string, createdAt: string, snippet: Array<TextPart>, };
+
+export type FoundTask = { id: string, channel: string, state: string, snippet: Array<TextPart>, };
+
+export type FoundChannel = { path: string, markedPath: Array<TextPart>, };
+
+export type FoundAgent = { id: string, markedName: Array<TextPart>, markedHandle: Array<TextPart>, };
+
+export type SearchResults = { messages: Array<FoundMessage>, tasks: Array<FoundTask>, channels: Array<FoundChannel>, agents: Array<FoundAgent>, };
