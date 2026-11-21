@@ -7,6 +7,7 @@ use serde_json::value::RawValue;
 
 use crate::access::BoardAccess;
 use crate::contract::ReplicaState;
+use crate::pacing::Pacing;
 use crate::protocol::{self, FeedEvent};
 use crate::replica::{MessageView, Replica};
 use crate::storage::{self, StorageError};
@@ -81,16 +82,28 @@ struct EventsPage {
 
 pub async fn copy_board(
     access: &BoardAccess,
-    replica: Replica,
+    mut replica: Replica,
+    pacing: Pacing,
     mut report: impl FnMut(ReplicaState),
 ) -> Result<CopiedBoard, CopyError> {
-    let client = protocol::client().ok_or(CopyError::NoHttpClient)?;
-    let total = message_total(&client, access).await?;
+    let reader = PatientReader {
+        client: protocol::reading_client().ok_or(CopyError::NoHttpClient)?,
+        access,
+        pacing,
+    };
+    let mut stored = replica.message_count();
+    let total = message_total(&reader, &mut || {
+        report(ReplicaState::Reconnecting { stored });
+    })
+    .await?;
 
-    let threads = read_every_thread(&client, access).await?;
+    let threads = read_every_thread(&reader, &mut || {
+        report(ReplicaState::Reconnecting { stored });
+    })
+    .await?;
     let oldest_root_id = threads.oldest_root_id;
     let mut feed_cursor = threads.feed_cursor;
-    let (mut replica, mut stored) = storage::store(replica, threads.views, None)
+    (replica, stored) = storage::store(replica, threads.views, None)
         .await
         .map_err(CopyError::Storage)?;
     report(ReplicaState::Copying { stored, total });
@@ -98,7 +111,11 @@ pub async fn copy_board(
     if let Some(oldest_root_id) = oldest_root_id {
         let mut after = oldest_root_id;
         loop {
-            let page: EventsPage = read(&client, access, "/events", &[("after", &after)]).await?;
+            let page: EventsPage = reader
+                .read("/events", &[("after", &after)], &mut || {
+                    report(ReplicaState::Reconnecting { stored });
+                })
+                .await?;
             let views = page
                 .events
                 .iter()
@@ -134,8 +151,8 @@ struct EveryThread {
 }
 
 async fn read_every_thread(
-    client: &Client,
-    access: &BoardAccess,
+    reader: &PatientReader<'_>,
+    on_failure: &mut impl FnMut(),
 ) -> Result<EveryThread, CopyError> {
     let mut views = Vec::new();
     let mut oldest_root: Option<(String, String)> = None;
@@ -146,7 +163,7 @@ async fn read_every_thread(
         if let Some(before) = before.as_deref() {
             query.push(("before", before));
         }
-        let page: ThreadsPage = read(client, access, "/threads", &query).await?;
+        let page: ThreadsPage = reader.read("/threads", &query, on_failure).await?;
         feed_cursor.get_or_insert(page.cursor);
         for thread in page.threads {
             let root = MessageView::parse(thread.message.get()).map_err(CopyError::InvalidView)?;
@@ -173,7 +190,10 @@ async fn read_every_thread(
     })
 }
 
-async fn message_total(client: &Client, access: &BoardAccess) -> Result<Option<u32>, CopyError> {
+async fn message_total(
+    reader: &PatientReader<'_>,
+    on_failure: &mut impl FnMut(),
+) -> Result<Option<u32>, CopyError> {
     let mut total: u64 = 0;
     let mut after: Option<String> = None;
     loop {
@@ -181,7 +201,7 @@ async fn message_total(client: &Client, access: &BoardAccess) -> Result<Option<u
         if let Some(after) = after.as_deref() {
             query.push(("after", after));
         }
-        let page: ChannelsPage = read(client, access, "/channels", &query).await?;
+        let page: ChannelsPage = reader.read("/channels", &query, on_failure).await?;
         for channel in page.channels {
             let Some(messages) = channel.messages else {
                 return Ok(None);
@@ -196,22 +216,44 @@ async fn message_total(client: &Client, access: &BoardAccess) -> Result<Option<u
     Ok(u32::try_from(total).ok())
 }
 
-async fn read<Page: DeserializeOwned>(
-    client: &Client,
-    access: &BoardAccess,
-    path: &str,
-    query: &[(&str, &str)],
-) -> Result<Page, CopyError> {
-    let address_text = format!("{}{path}", access.url());
-    let mut address =
-        Url::parse(&address_text).map_err(|_| CopyError::InvalidAddress(address_text.clone()))?;
-    address.query_pairs_mut().extend_pairs(query);
-    let response = client
-        .get(address)
-        .bearer_auth(access.token())
-        .send()
-        .await
-        .map_err(CopyError::Request)?;
-    let accepted_response = response.error_for_status().map_err(CopyError::Request)?;
-    accepted_response.json().await.map_err(CopyError::Request)
+struct PatientReader<'access> {
+    client: Client,
+    access: &'access BoardAccess,
+    pacing: Pacing,
+}
+
+impl PatientReader<'_> {
+    async fn read<Page: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, &str)],
+        on_failure: &mut impl FnMut(),
+    ) -> Result<Page, CopyError> {
+        let address_text = format!("{}{path}", self.access.url());
+        let mut address = Url::parse(&address_text)
+            .map_err(|_| CopyError::InvalidAddress(address_text.clone()))?;
+        address.query_pairs_mut().extend_pairs(query);
+        let mut pause = self.pacing.first_pause();
+        loop {
+            match self.read_once(address.clone()).await {
+                Err(error) if error.is_decode() => return Err(CopyError::Request(error)),
+                Err(_) => {
+                    on_failure();
+                    tokio::time::sleep(pause).await;
+                    pause = self.pacing.pause_after(pause);
+                }
+                Ok(page) => return Ok(page),
+            }
+        }
+    }
+
+    async fn read_once<Page: DeserializeOwned>(&self, address: Url) -> reqwest::Result<Page> {
+        let response = self
+            .client
+            .get(address)
+            .bearer_auth(self.access.token())
+            .send()
+            .await?;
+        response.error_for_status()?.json().await
+    }
 }

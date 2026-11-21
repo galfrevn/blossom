@@ -93,7 +93,8 @@ impl Session {
         let report_state = |state| {
             self.replica_state.send_replace(Some(state));
         };
-        let copied = match copy_board(&access, replica, report_state).await {
+        let pacing = Pacing::for_the_app();
+        let copied = match copy_board(&access, replica, pacing, report_state).await {
             Ok(copied) => copied,
             Err(error) => {
                 eprintln!("blossom: the board could not be copied: {error}");
@@ -104,7 +105,7 @@ impl Session {
             &access,
             copied.replica,
             copied.feed_cursor,
-            Pacing::for_the_app(),
+            pacing,
             report_state,
         )
         .await;

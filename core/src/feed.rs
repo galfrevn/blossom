@@ -6,28 +6,11 @@ use tokio::time::Instant;
 
 use crate::access::BoardAccess;
 use crate::contract::ReplicaState;
+use crate::pacing::Pacing;
 use crate::protocol::{self, FeedEvent};
 use crate::replica::{MessageView, Replica};
 use crate::sse::{EventStreamReader, Frame};
 use crate::storage::{self, StorageError};
-
-pub struct Pacing {
-    first_pause: Duration,
-    longest_pause: Duration,
-}
-
-impl Pacing {
-    pub fn new(first_pause: Duration, longest_pause: Duration) -> Pacing {
-        Pacing {
-            first_pause,
-            longest_pause,
-        }
-    }
-
-    pub fn for_the_app() -> Pacing {
-        Pacing::new(Duration::from_secs(1), Duration::from_secs(30))
-    }
-}
 
 #[derive(Debug)]
 pub enum FollowError {
@@ -60,10 +43,10 @@ pub async fn follow_feed(
     pacing: Pacing,
     mut report: impl FnMut(ReplicaState),
 ) -> Result<(), FollowError> {
-    let client = protocol::streaming_client().ok_or(FollowError::NoHttpClient)?;
+    let client = protocol::reading_client().ok_or(FollowError::NoHttpClient)?;
     let mut stored = replica.message_count();
     let mut cursor = from_cursor;
-    let mut pause = pacing.first_pause;
+    let mut pause = pacing.first_pause();
     loop {
         let Some(mut stream) = open_stream(&client, access, &cursor).await else {
             report(ReplicaState::Reconnecting { stored });
@@ -94,19 +77,19 @@ pub async fn follow_feed(
             report(ReplicaState::Live { stored });
         }
         let ended_at_once_without_progress =
-            cursor == cursor_when_opened && opened_at.elapsed() < pacing.first_pause;
+            cursor == cursor_when_opened && opened_at.elapsed() < pacing.first_pause();
         if ended_at_once_without_progress {
             report(ReplicaState::Reconnecting { stored });
             pause = wait_before_reconnecting(pause, &pacing).await;
         } else {
-            pause = pacing.first_pause;
+            pause = pacing.first_pause();
         }
     }
 }
 
 async fn wait_before_reconnecting(pause: Duration, pacing: &Pacing) -> Duration {
     tokio::time::sleep(pause).await;
-    (pause * 2).min(pacing.longest_pause)
+    pacing.pause_after(pause)
 }
 
 async fn open_stream(client: &Client, access: &BoardAccess, cursor: &str) -> Option<Response> {

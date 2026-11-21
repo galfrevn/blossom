@@ -32,15 +32,26 @@ struct Copy {
     reported_states: Vec<ReplicaState>,
 }
 
+fn quick_pacing() -> Pacing {
+    Pacing::new(Duration::from_millis(1), Duration::from_millis(5))
+}
+
 async fn copy_of(history: &BoardHistory) -> Result<Copy, Box<dyn Error>> {
+    copy_from(&FakeBoard::with_history(history.clone())).await
+}
+
+async fn copy_from(board: &FakeBoard) -> Result<Copy, Box<dyn Error>> {
     let server = MockServer::start().await;
-    serve_board(&server, FakeBoard::with_history(history.clone())).await;
+    serve_board(&server, board.clone()).await;
     let access = BoardAccess::new(format!("{}/api/board", server.uri()), "token-of-ada");
     let folder = TempDir::new()?;
     let replica = Replica::open(&folder.path().join("board.sqlite"))?;
     let mut reported_states = Vec::new();
 
-    let copied = copy_board(&access, replica, |state| reported_states.push(state)).await?;
+    let copied = copy_board(&access, replica, quick_pacing(), |state| {
+        reported_states.push(state);
+    })
+    .await?;
 
     Ok(Copy {
         _folder: folder,
@@ -127,6 +138,39 @@ async fn an_empty_board_is_copied_as_an_empty_replica() {
     );
 }
 
+#[tokio::test]
+async fn pages_the_board_refuses_are_asked_for_again_while_reporting_reconnecting() {
+    let board = FakeBoard::with_history(history_across_two_channels());
+    board
+        .pages_to_refuse
+        .store(4, std::sync::atomic::Ordering::SeqCst);
+
+    let copy = copy_from(&board).await.unwrap();
+
+    assert_eq!(copy.copied.replica.message_count(), 7);
+    assert!(
+        copy.reported_states
+            .contains(&ReplicaState::Reconnecting { stored: 0 })
+    );
+}
+
+#[tokio::test]
+async fn a_page_slower_than_a_quick_answer_is_waited_for() {
+    let board = FakeBoard::with_history(history_across_two_channels());
+    board
+        .pages_to_slow_down
+        .store(1, std::sync::atomic::Ordering::SeqCst);
+
+    let copy = copy_from(&board).await.unwrap();
+
+    assert_eq!(copy.copied.replica.message_count(), 7);
+    let reconnected = copy
+        .reported_states
+        .iter()
+        .any(|state| matches!(state, ReplicaState::Reconnecting { .. }));
+    assert!(!reconnected);
+}
+
 struct Following {
     _server: MockServer,
     _folder: TempDir,
@@ -136,8 +180,7 @@ struct Following {
 }
 
 async fn copy_then_follow(board: &FakeBoard) -> Result<Following, Box<dyn Error>> {
-    let quick_pacing = Pacing::new(Duration::from_millis(1), Duration::from_millis(5));
-    copy_then_follow_at(board, quick_pacing).await
+    copy_then_follow_at(board, quick_pacing()).await
 }
 
 async fn copy_then_follow_at(
@@ -150,7 +193,7 @@ async fn copy_then_follow_at(
     let folder = TempDir::new()?;
     let file = folder.path().join("board.sqlite");
     let replica = Replica::open(&file)?;
-    let copied = copy_board(&access, replica, |_| {}).await?;
+    let copied = copy_board(&access, replica, quick_pacing(), |_| {}).await?;
     let (sender, states) = unbounded_channel();
     let task = tokio::spawn(async move {
         follow_feed(

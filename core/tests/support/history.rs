@@ -11,6 +11,7 @@ pub const THREADS_PER_PAGE: usize = 2;
 pub const EVENTS_PER_PAGE: usize = 3;
 pub const FRAMES_PER_STREAM: usize = 2;
 const PAUSE_WHEN_CAUGHT_UP: Duration = Duration::from_millis(20);
+pub const SLOW_PAGE: Duration = Duration::from_millis(2500);
 
 #[derive(Clone)]
 pub struct HistoryEvent {
@@ -185,6 +186,8 @@ impl BoardHistory {
 #[derive(Clone, Default)]
 pub struct FakeBoard {
     pub history: Arc<Mutex<BoardHistory>>,
+    pub pages_to_refuse: Arc<AtomicUsize>,
+    pub pages_to_slow_down: Arc<AtomicUsize>,
     pub streams_to_refuse: Arc<AtomicUsize>,
     pub streams_end_at_once: Arc<AtomicBool>,
     pub stream_starts: Arc<Mutex<Vec<String>>>,
@@ -214,8 +217,7 @@ struct HistoryResponder {
 
 impl HistoryResponder {
     fn respond_with_stream(&self, request: &Request) -> ResponseTemplate {
-        if self.board.streams_to_refuse.load(Ordering::SeqCst) > 0 {
-            self.board.streams_to_refuse.fetch_sub(1, Ordering::SeqCst);
+        if take_one(&self.board.streams_to_refuse) {
             return ResponseTemplate::new(503);
         }
         let Some(after) = request
@@ -267,6 +269,9 @@ impl Respond for HistoryResponder {
         if request.url.path() == "/api/board/events" && wants_a_stream {
             return self.respond_with_stream(request);
         }
+        if take_one(&self.board.pages_to_refuse) {
+            return ResponseTemplate::new(503);
+        }
         let query: BTreeMap<String, String> = request
             .url
             .query_pairs()
@@ -286,8 +291,20 @@ impl Respond for HistoryResponder {
             },
             _ => return ResponseTemplate::new(404),
         };
-        ResponseTemplate::new(200).set_body_json(body)
+        let response = ResponseTemplate::new(200).set_body_json(body);
+        if take_one(&self.board.pages_to_slow_down) {
+            return response.set_delay(SLOW_PAGE);
+        }
+        response
     }
+}
+
+fn take_one(remaining: &AtomicUsize) -> bool {
+    remaining
+        .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+            count.checked_sub(1)
+        })
+        .is_ok()
 }
 
 pub async fn serve_board(server: &MockServer, board: FakeBoard) {

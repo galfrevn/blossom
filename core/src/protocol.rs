@@ -37,7 +37,7 @@ pub fn client() -> Option<Client> {
         .ok()
 }
 
-pub fn streaming_client() -> Option<Client> {
+pub fn reading_client() -> Option<Client> {
     Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .read_timeout(SILENCE_THAT_ENDS_A_STREAM)

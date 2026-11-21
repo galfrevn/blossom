@@ -81,13 +81,36 @@ When a local board opens, the core copies it whole into a replica on disk, follo
 - **By hand, against a real `vb serve`** holding 100,000 messages: the copy time, a post reaching the replica, and a restart that does not copy again.
 - Prior art: the core's tests in `core/tests/` drive the open board with wiremock and temporary token folders; this follows the same shape.
 
+## Edge Cases
+
+Each case, and where it is handled. The tests named are in `core/tests/sync.rs`, `follow.rs`, `replica.rs` and `sse.rs`.
+
+| Case | What the app does | Where |
+| --- | --- | --- |
+| The board closes the feed, as `vb serve` does every 280 seconds | Reopens it at once from the replica's cursor | 02, tested and measured |
+| The board refuses the feed, or cannot be reached | Says "Reconnecting" and asks again after 1 s, doubling up to 30 s | 02, tested |
+| The board ends every stream as soon as it opens it | Counts that as a refusal, so it is never asked again in a tight loop | 02, tested |
+| A stream is cut inside a frame | Drops the partial frame; the next stream resumes from the last whole one | 02, tested |
+| A stretch of the feed carries only bookkeeping | Still moves and stores the cursor | 02, tested |
+| A page of the copy fails, or the board answers with an error | Says "Reconnecting" and asks for that page again, with the feed's pauses, instead of abandoning the copy | 02, tested |
+| The board is slow to answer a page of the copy | Waits up to 45 s of silence; only discovery expects an answer within 2 s | 02, tested |
+| An older view of a message arrives after a newer one | Keeps the newer one, by `version` | 01, tested |
+| `vb serve` restarts and mints a new token | Opens the board again with the new token; until 03 that means copying it whole again | 02, tested and verified by hand |
+| The board is killed and leaves its token file behind | Says "Reconnecting" for as long as it is gone | 02 by hand; 04 makes it "No board running" |
+| The board sends an event the core cannot read, or the replica cannot be written | Stops that work with a log line, and the status bar keeps its last state | 04 decides what the status bar says |
+| A different board starts at the same address, such as `vb serve` with another `--dir` on the same port | Its messages would join the first board's replica, which is named by address | 03, which names a replica by address and oldest message |
+| The app restarts | Copies the board whole again | 03 resumes from the stored cursor |
+| Two copies of the app share one replica, as a development build beside a release one did | SQLite keeps the file whole, but each app counts only what it stored itself | Left as is: a released app runs once per bundle |
+| A post reaches the replica up to 2 s late | `vb serve` polls its own log, up to every 2 s when quiet; Blossom adds well under a millisecond | The board's, recorded in the research |
+| A hosted board | Not opened: only loopback boards are found, so nothing reaches Vercel's API yet | Out of scope, below |
+
 ## Out of Scope
 
 - Any lens, and any view of the board's content. The replica fills up and the status bar says so; Flow comes next.
 - Showing the newest threads first (ADR 0011), which arrives with Flow.
 - The full-text index, which arrives with search. The spike measured it at 0.2 ms a query.
 - Reading a stopped board's replica offline. With no lens yet there is nothing to read, and it needs a decision on what the app opens on when the board is gone.
-- Vercel's hosted board, whose first copy is decided with the token spike.
+- Vercel's hosted board. The token spike (ADR 0022, proposed) settled how to get its token, not how to copy it. Every read there costs about five requests against Vercel's per-login rate limit, so a whole first copy of 100,000 messages would spend about 20,000 of the person's requests, an estimate not yet measured. The board also leaves out channel counts, so there is no total to show. Its first copy is decided once it is measured against a real hosted board.
 - Writing, attachments and their downloads.
 - Trimming what each stored view keeps. The spike stored full views: 98 MB for 100,000 messages.
 
