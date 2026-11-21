@@ -7,16 +7,20 @@ use serde_json::{Value, json};
 use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
+use crate::answers::{answer_discovery_naming, answer_me};
+
 pub const THREADS_PER_PAGE: usize = 2;
 pub const EVENTS_PER_PAGE: usize = 3;
 pub const FRAMES_PER_STREAM: usize = 2;
 const PAUSE_WHEN_CAUGHT_UP: Duration = Duration::from_millis(20);
 pub const SLOW_PAGE: Duration = Duration::from_millis(2500);
+const STALLED_STREAM: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 pub struct HistoryEvent {
     pub message: Value,
     pub carries_a_message: bool,
+    pub unreadable: bool,
 }
 
 #[derive(Clone, Default)]
@@ -38,6 +42,7 @@ impl BoardHistory {
                 "text": text
             }),
             carries_a_message: true,
+            unreadable: false,
         });
     }
 
@@ -49,6 +54,7 @@ impl BoardHistory {
         self.events.push(HistoryEvent {
             message,
             carries_a_message: true,
+            unreadable: false,
         });
     }
 
@@ -56,6 +62,15 @@ impl BoardHistory {
         self.events.push(HistoryEvent {
             message: Value::Null,
             carries_a_message: false,
+            unreadable: false,
+        });
+    }
+
+    pub fn unreadable_event(&mut self) {
+        self.events.push(HistoryEvent {
+            message: Value::Null,
+            carries_a_message: false,
+            unreadable: true,
         });
     }
 
@@ -147,7 +162,9 @@ impl BoardHistory {
         let mut body = format!(": connected\n\nid: {after}\n\n");
         for (position, event) in self.events.iter().enumerate().take(last).skip(first) {
             let cursor = Self::cursor_of(position);
-            if event.carries_a_message {
+            if event.unreadable {
+                body.push_str(&format!("id: {cursor}\nevent: board\ndata: not json\n\n"));
+            } else if event.carries_a_message {
                 let data = json!({
                     "cursor": cursor,
                     "type": "message.posted",
@@ -189,6 +206,7 @@ pub struct FakeBoard {
     pub pages_to_refuse: Arc<AtomicUsize>,
     pub pages_to_slow_down: Arc<AtomicUsize>,
     pub streams_to_refuse: Arc<AtomicUsize>,
+    pub streams_to_stall: Arc<AtomicUsize>,
     pub streams_end_at_once: Arc<AtomicBool>,
     pub stream_starts: Arc<Mutex<Vec<String>>>,
     pub streamed_positions: Arc<Mutex<Vec<usize>>>,
@@ -219,6 +237,11 @@ impl HistoryResponder {
     fn respond_with_stream(&self, request: &Request) -> ResponseTemplate {
         if take_one(&self.board.streams_to_refuse) {
             return ResponseTemplate::new(503);
+        }
+        if take_one(&self.board.streams_to_stall) {
+            return ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_delay(STALLED_STREAM);
         }
         let Some(after) = request
             .headers
@@ -308,6 +331,9 @@ fn take_one(remaining: &AtomicUsize) -> bool {
 }
 
 pub async fn serve_board(server: &MockServer, board: FakeBoard) {
+    let url = format!("{}/api/board", server.uri());
+    answer_discovery_naming(server, &url).await;
+    answer_me(server, "token-of-ada", "ada", "Ada Lovelace").await;
     Mock::given(method("GET"))
         .and(path_regex("^/api/board/(threads|channels|events)$"))
         .respond_with(HistoryResponder { board })

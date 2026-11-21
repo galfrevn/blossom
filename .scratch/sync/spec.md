@@ -96,8 +96,11 @@ Each case, and where it is handled. The tests named are in `core/tests/sync.rs`,
 | The board is slow to answer a page of the copy | Waits up to 45 s of silence; only discovery expects an answer within 2 s | 02, tested |
 | An older view of a message arrives after a newer one | Keeps the newer one, by `version` | 01, tested |
 | `vb serve` restarts and mints a new token | Opens the board again with the new token; until 03 that means copying it whole again | 02, tested and verified by hand |
-| The board is killed and leaves its token file behind | Says "Reconnecting" for as long as it is gone | 02 by hand; 04 makes it "No board running" |
-| The board sends an event the core cannot read, or the replica cannot be written | Stops that work with a log line, and the status bar keeps its last state | 04 decides what the status bar says |
+| The board is killed and leaves its token file behind | Says "Reconnecting", then "No board running" about 3 s later; the replica stays | 04, tested and verified by hand |
+| The board freezes, holding its connections without answering | 45 s of silence ends the stream, and opening another waits at most 10 s; "No board running" follows within about 90 s, and the board opens again once it answers | 04, tested and verified by hand |
+| The board refuses its feed but still answers discovery | Keeps reconnecting; it is never called gone | 04, tested |
+| The board sends an event or page the core cannot read | Stops, and says "Stopped: can't read the board"; restarting the app tries again | 04, tested |
+| The replica cannot be opened or written | Stops, and says "Stopped: can't write the replica" | 04, tested |
 | A different board starts at the same address, such as `vb serve` with another `--dir` on the same port | Its messages would join the first board's replica, which is named by address | 03, which names a replica by address and oldest message |
 | The app restarts | Copies the board whole again | 03 resumes from the stored cursor |
 | Two copies of the app share one replica, as a development build beside a release one did | SQLite keeps the file whole, but each app counts only what it stored itself | Left as is: a released app runs once per bundle |

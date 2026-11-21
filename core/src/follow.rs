@@ -46,6 +46,12 @@ impl OpenBoardFollower {
         Some(open_board)
     }
 
+    pub fn forget_the_open_board(&mut self) {
+        self.settled_snapshot = None;
+        self.last_reported_open_board = None;
+        self.access_to_open_board = None;
+    }
+
     pub fn access_to_open_board(&self) -> Option<&BoardAccess> {
         self.access_to_open_board.as_ref()
     }

@@ -6,8 +6,8 @@ use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 
 use crate::access::BoardAccess;
-use crate::contract::ReplicaState;
-use crate::pacing::Pacing;
+use crate::contract::{ReplicaState, StopReason};
+use crate::pacing::{Pacing, Retries};
 use crate::protocol::{self, FeedEvent};
 use crate::replica::{MessageView, Replica};
 use crate::storage::{self, StorageError};
@@ -27,6 +27,7 @@ pub enum CopyError {
     Request(reqwest::Error),
     InvalidView(serde_json::Error),
     Storage(StorageError),
+    BoardGone,
 }
 
 impl fmt::Display for CopyError {
@@ -44,11 +45,21 @@ impl fmt::Display for CopyError {
                 )
             }
             CopyError::Storage(error) => write!(formatter, "{error}"),
+            CopyError::BoardGone => write!(formatter, "the board stopped answering"),
         }
     }
 }
 
 impl std::error::Error for CopyError {}
+
+impl CopyError {
+    pub(crate) fn stop_reason(&self) -> StopReason {
+        match self {
+            CopyError::Storage(_) => StopReason::UnwritableReplica,
+            _ => StopReason::UnreadableBoard,
+        }
+    }
+}
 
 #[derive(Deserialize)]
 struct ThreadsPage {
@@ -86,18 +97,18 @@ pub async fn copy_board(
     pacing: Pacing,
     mut report: impl FnMut(ReplicaState),
 ) -> Result<CopiedBoard, CopyError> {
-    let reader = PatientReader {
-        client: protocol::reading_client().ok_or(CopyError::NoHttpClient)?,
+    let mut reader = PatientReader {
+        client: protocol::reading_client(pacing.longest_silence).ok_or(CopyError::NoHttpClient)?,
         access,
-        pacing,
+        retries: Retries::new(pacing, access),
     };
     let mut stored = replica.message_count();
-    let total = message_total(&reader, &mut || {
+    let total = message_total(&mut reader, &mut || {
         report(ReplicaState::Reconnecting { stored });
     })
     .await?;
 
-    let threads = read_every_thread(&reader, &mut || {
+    let threads = read_every_thread(&mut reader, &mut || {
         report(ReplicaState::Reconnecting { stored });
     })
     .await?;
@@ -151,7 +162,7 @@ struct EveryThread {
 }
 
 async fn read_every_thread(
-    reader: &PatientReader<'_>,
+    reader: &mut PatientReader<'_>,
     on_failure: &mut impl FnMut(),
 ) -> Result<EveryThread, CopyError> {
     let mut views = Vec::new();
@@ -191,7 +202,7 @@ async fn read_every_thread(
 }
 
 async fn message_total(
-    reader: &PatientReader<'_>,
+    reader: &mut PatientReader<'_>,
     on_failure: &mut impl FnMut(),
 ) -> Result<Option<u32>, CopyError> {
     let mut total: u64 = 0;
@@ -219,12 +230,12 @@ async fn message_total(
 struct PatientReader<'access> {
     client: Client,
     access: &'access BoardAccess,
-    pacing: Pacing,
+    retries: Retries<'access>,
 }
 
 impl PatientReader<'_> {
     async fn read<Page: DeserializeOwned>(
-        &self,
+        &mut self,
         path: &str,
         query: &[(&str, &str)],
         on_failure: &mut impl FnMut(),
@@ -233,16 +244,20 @@ impl PatientReader<'_> {
         let mut address = Url::parse(&address_text)
             .map_err(|_| CopyError::InvalidAddress(address_text.clone()))?;
         address.query_pairs_mut().extend_pairs(query);
-        let mut pause = self.pacing.first_pause();
         loop {
             match self.read_once(address.clone()).await {
+                Ok(page) => {
+                    self.retries.succeeded();
+                    return Ok(page);
+                }
                 Err(error) if error.is_decode() => return Err(CopyError::Request(error)),
                 Err(_) => {
                     on_failure();
-                    tokio::time::sleep(pause).await;
-                    pause = self.pacing.pause_after(pause);
+                    self.retries
+                        .wait_after_failure()
+                        .await
+                        .map_err(|_| CopyError::BoardGone)?;
                 }
-                Ok(page) => return Ok(page),
             }
         }
     }

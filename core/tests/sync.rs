@@ -1,15 +1,23 @@
+#[path = "support/answers.rs"]
+mod answers;
 #[path = "support/history.rs"]
 mod history;
 
+use std::convert::Infallible;
 use std::error::Error;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use blossom::contract::ReplicaState;
+use blossom::contract::{ReplicaState, StopReason};
 use blossom::replica::Replica;
-use blossom::{BoardAccess, CopiedBoard, FollowError, Pacing, copy_board, follow_feed};
+use blossom::{
+    BoardAccess, CopiedBoard, FollowError, KeepingEnded, Pacing, copy_board, follow_feed,
+    keep_in_step,
+};
 use history::{BoardHistory, FakeBoard, serve_board};
 use tempfile::TempDir;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::task::JoinHandle;
 use wiremock::MockServer;
@@ -33,7 +41,13 @@ struct Copy {
 }
 
 fn quick_pacing() -> Pacing {
-    Pacing::new(Duration::from_millis(1), Duration::from_millis(5))
+    Pacing {
+        first_pause: Duration::from_millis(1),
+        longest_pause: Duration::from_millis(5),
+        failures_before_asking_the_board: 3,
+        longest_wait_for_a_stream: Duration::from_millis(200),
+        longest_silence: Duration::from_secs(5),
+    }
 }
 
 async fn copy_of(history: &BoardHistory) -> Result<Copy, Box<dyn Error>> {
@@ -176,7 +190,7 @@ struct Following {
     _folder: TempDir,
     file: PathBuf,
     states: UnboundedReceiver<ReplicaState>,
-    task: JoinHandle<Result<(), FollowError>>,
+    task: JoinHandle<Result<Infallible, FollowError>>,
 }
 
 async fn copy_then_follow(board: &FakeBoard) -> Result<Following, Box<dyn Error>> {
@@ -337,7 +351,11 @@ async fn a_board_that_ends_every_stream_at_once_is_asked_again_ever_more_slowly(
     board
         .streams_end_at_once
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let pacing = Pacing::new(Duration::from_millis(10), Duration::from_millis(40));
+    let pacing = Pacing {
+        first_pause: Duration::from_millis(10),
+        longest_pause: Duration::from_millis(40),
+        ..quick_pacing()
+    };
     let mut following = copy_then_follow_at(&board, pacing).await.unwrap();
 
     assert!(
@@ -352,4 +370,200 @@ async fn a_board_that_ends_every_stream_at_once_is_asked_again_ever_more_slowly(
 
     let streams_opened = board.stream_starts.lock().unwrap().len();
     assert!(streams_opened <= 12, "{streams_opened} streams opened");
+}
+
+struct Keeping {
+    server: Option<MockServer>,
+    _folder: TempDir,
+    file: PathBuf,
+    states: UnboundedReceiver<ReplicaState>,
+    task: JoinHandle<KeepingEnded>,
+}
+
+async fn start_keeping_in_step(board: &FakeBoard) -> Result<Keeping, Box<dyn Error>> {
+    let server = MockServer::builder().start().await;
+    serve_board(&server, board.clone()).await;
+    let access = BoardAccess::new(format!("{}/api/board", server.uri()), "token-of-ada");
+    let folder = TempDir::new()?;
+    let file = folder.path().join("board.sqlite");
+    let (sender, states) = unbounded_channel();
+    let file_to_keep = file.clone();
+    let task = tokio::spawn(async move {
+        keep_in_step(&access, &file_to_keep, quick_pacing(), |state| {
+            sender.send(state).ok();
+        })
+        .await
+    });
+    Ok(Keeping {
+        server: Some(server),
+        _folder: folder,
+        file,
+        states,
+        task,
+    })
+}
+
+async fn until_ended(task: JoinHandle<KeepingEnded>) -> Option<KeepingEnded> {
+    tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .ok()?
+        .ok()
+}
+
+#[tokio::test]
+async fn a_board_that_stops_answering_while_followed_is_gone_and_its_replica_kept() {
+    let board = FakeBoard::with_history(history_across_two_channels());
+    let mut keeping = start_keeping_in_step(&board).await.unwrap();
+    assert!(until_reported(&mut keeping.states, &ReplicaState::Live { stored: 7 }).await);
+
+    drop(keeping.server.take());
+
+    let ended = until_ended(keeping.task).await;
+    assert!(matches!(ended, Some(KeepingEnded::BoardGone)));
+    assert_eq!(Replica::open(&keeping.file).unwrap().message_count(), 7);
+}
+
+#[tokio::test]
+async fn a_board_that_stops_answering_while_copied_is_gone() {
+    let board = FakeBoard::with_history(history_across_two_channels());
+    board
+        .pages_to_refuse
+        .store(usize::MAX, std::sync::atomic::Ordering::SeqCst);
+    let mut keeping = start_keeping_in_step(&board).await.unwrap();
+    assert!(
+        until_reported(
+            &mut keeping.states,
+            &ReplicaState::Reconnecting { stored: 0 }
+        )
+        .await
+    );
+
+    drop(keeping.server.take());
+
+    let ended = until_ended(keeping.task).await;
+    assert!(matches!(ended, Some(KeepingEnded::BoardGone)));
+}
+
+#[tokio::test]
+async fn a_board_that_refuses_its_feed_but_still_answers_is_not_gone() {
+    let board = FakeBoard::with_history(history_across_two_channels());
+    board
+        .streams_to_refuse
+        .store(usize::MAX, std::sync::atomic::Ordering::SeqCst);
+    let mut keeping = start_keeping_in_step(&board).await.unwrap();
+    assert!(
+        until_reported(
+            &mut keeping.states,
+            &ReplicaState::Reconnecting { stored: 7 }
+        )
+        .await
+    );
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    assert!(!keeping.task.is_finished());
+    keeping.task.abort();
+}
+
+#[tokio::test]
+async fn an_event_the_core_cannot_read_stops_the_replica_and_says_so() {
+    let board = FakeBoard::with_history(history_across_two_channels());
+    let mut keeping = start_keeping_in_step(&board).await.unwrap();
+    assert!(until_reported(&mut keeping.states, &ReplicaState::Live { stored: 7 }).await);
+
+    board.change_history(BoardHistory::unreadable_event);
+
+    let stopped = ReplicaState::Stopped {
+        stored: 7,
+        reason: StopReason::UnreadableBoard,
+    };
+    assert!(until_reported(&mut keeping.states, &stopped).await);
+    let ended = until_ended(keeping.task).await;
+    assert!(matches!(ended, Some(KeepingEnded::Stopped(_))));
+}
+
+#[tokio::test]
+async fn a_replica_that_cannot_be_opened_stops_and_says_so() {
+    let folder = TempDir::new().unwrap();
+    std::fs::write(folder.path().join("blocker"), "").unwrap();
+    let file = folder.path().join("blocker").join("board.sqlite");
+    let access = BoardAccess::new("http://127.0.0.1:9/api/board", "token-of-ada");
+    let mut reported_states = Vec::new();
+
+    let ended = keep_in_step(&access, &file, quick_pacing(), |state| {
+        reported_states.push(state);
+    })
+    .await;
+
+    assert!(matches!(ended, KeepingEnded::Stopped(_)));
+    assert_eq!(
+        reported_states,
+        vec![ReplicaState::Stopped {
+            stored: 0,
+            reason: StopReason::UnwritableReplica,
+        }]
+    );
+}
+
+#[tokio::test]
+async fn a_stream_the_board_does_not_open_in_time_counts_as_a_refusal() {
+    let board = FakeBoard::with_history(history_across_two_channels());
+    board
+        .streams_to_stall
+        .store(1, std::sync::atomic::Ordering::SeqCst);
+    let mut following = copy_then_follow(&board).await.unwrap();
+
+    assert!(
+        until_reported(
+            &mut following.states,
+            &ReplicaState::Reconnecting { stored: 7 }
+        )
+        .await
+    );
+    assert!(until_reported(&mut following.states, &ReplicaState::Live { stored: 7 }).await);
+    following.task.abort();
+}
+
+async fn start_board_that_falls_silent() -> Result<String, Box<dyn Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let url = format!("http://{}/api/board", listener.local_addr()?);
+    tokio::spawn(async move {
+        while let Ok((mut connection, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut request = vec![0; 4096];
+                let request_size = connection.read(&mut request).await.unwrap_or(0);
+                if request_size == 0 {
+                    return;
+                }
+                let opening =
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n: connected\n\n";
+                connection.write_all(opening.as_bytes()).await.ok();
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            });
+        }
+    });
+    Ok(url)
+}
+
+#[tokio::test]
+async fn a_stream_that_falls_silent_counts_as_a_failure() {
+    let url = start_board_that_falls_silent().await.unwrap();
+    let access = BoardAccess::new(url, "token-of-ada");
+    let folder = TempDir::new().unwrap();
+    let replica = Replica::open(&folder.path().join("board.sqlite")).unwrap();
+    let pacing = Pacing {
+        longest_silence: Duration::from_millis(50),
+        ..quick_pacing()
+    };
+    let (sender, mut states) = unbounded_channel();
+    let task = tokio::spawn(async move {
+        follow_feed(&access, replica, String::from("event-0"), pacing, |state| {
+            sender.send(state).ok();
+        })
+        .await
+    });
+
+    assert!(until_reported(&mut states, &ReplicaState::Live { stored: 0 }).await);
+    assert!(until_reported(&mut states, &ReplicaState::Reconnecting { stored: 0 }).await);
+    task.abort();
 }

@@ -143,3 +143,27 @@ test("while the feed is reconnecting, the status bar says so", () => {
 
   expect(statusBar().getByText("Reconnecting")).toBeDefined();
 });
+
+test("when the replica stops, the status bar says why", () => {
+  renderApplicationWhileTheCoreSays({
+    openBoard: boardOfAda,
+    replicaState: {
+      kind: "stopped",
+      stored: 100_006,
+      reason: "unwritableReplica",
+    },
+  });
+
+  expect(
+    statusBar().getByText("Stopped: can't write the replica"),
+  ).toBeDefined();
+});
+
+test("when the board sends what the core cannot read, the status bar says so", () => {
+  renderApplicationWhileTheCoreSays({
+    openBoard: boardOfAda,
+    replicaState: { kind: "stopped", stored: 7, reason: "unreadableBoard" },
+  });
+
+  expect(statusBar().getByText("Stopped: can't read the board")).toBeDefined();
+});

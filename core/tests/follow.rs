@@ -247,3 +247,53 @@ async fn a_board_that_restarts_with_a_new_token_is_reported_again_with_its_new_a
     let access_after_restart = BoardAccess::new(&board.url, "token-of-ada-after-restart");
     assert!(follower.access_to_open_board() == Some(&access_after_restart));
 }
+
+#[tokio::test]
+async fn a_forgotten_open_board_that_still_answers_is_reported_again() {
+    let board = start_fake_board("token-of-ada", "ada", "Ada Lovelace").await;
+    let token_folder = TempDir::new().unwrap();
+    write_token_file(
+        token_folder.path(),
+        "board.json",
+        &board.url,
+        "token-of-ada",
+        0,
+    )
+    .unwrap();
+    let mut follower = OpenBoardFollower::new(token_folder.path().to_path_buf());
+    follower.look().await;
+
+    follower.forget_the_open_board();
+
+    assert_eq!(
+        follower.look().await,
+        Some(OpenBoard::Open {
+            url: board.url.clone(),
+            person: ada(),
+        })
+    );
+    assert!(follower.access_to_open_board().is_some());
+}
+
+#[tokio::test]
+async fn a_forgotten_open_board_that_stopped_answering_is_none_running_though_its_file_remains() {
+    let board = start_fake_board("token-of-ada", "ada", "Ada Lovelace").await;
+    let token_folder = TempDir::new().unwrap();
+    write_token_file(
+        token_folder.path(),
+        "board.json",
+        &board.url,
+        "token-of-ada",
+        0,
+    )
+    .unwrap();
+    let mut follower = OpenBoardFollower::new(token_folder.path().to_path_buf());
+    follower.look().await;
+    drop(board);
+
+    follower.forget_the_open_board();
+
+    assert_eq!(follower.look().await, Some(OpenBoard::NoneRunning));
+    assert!(follower.access_to_open_board().is_none());
+    assert!(token_folder.path().join("board.json").exists());
+}

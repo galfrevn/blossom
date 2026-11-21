@@ -11,6 +11,8 @@ function describeReplica(replicaState: ReplicaState): string {
       return dictionary.status.live(replicaState.stored);
     case "reconnecting":
       return dictionary.status.reconnecting;
+    case "stopped":
+      return dictionary.status.stopped[replicaState.reason];
     default: {
       const stateWithoutText: never = replicaState;
       return stateWithoutText;

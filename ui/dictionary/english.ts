@@ -25,5 +25,9 @@ export const english = {
       return `${count(stored)} messages`;
     },
     reconnecting: "Reconnecting",
+    stopped: {
+      unreadableBoard: "Stopped: can't read the board",
+      unwritableReplica: "Stopped: can't write the replica",
+    },
   },
 };

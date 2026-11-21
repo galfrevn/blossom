@@ -6,6 +6,7 @@ pub fn typescript() -> String {
     let declarations = [
         Person::decl(&configuration),
         OpenBoard::decl(&configuration),
+        StopReason::decl(&configuration),
         ReplicaState::decl(&configuration),
     ];
     declarations
@@ -34,4 +35,23 @@ pub enum ReplicaState {
     Copying { stored: u32, total: Option<u32> },
     Live { stored: u32 },
     Reconnecting { stored: u32 },
+    Stopped { stored: u32, reason: StopReason },
+}
+
+impl ReplicaState {
+    pub fn stored(&self) -> u32 {
+        match self {
+            ReplicaState::Copying { stored, .. }
+            | ReplicaState::Live { stored }
+            | ReplicaState::Reconnecting { stored }
+            | ReplicaState::Stopped { stored, .. } => *stored,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum StopReason {
+    UnreadableBoard,
+    UnwritableReplica,
 }

@@ -1,12 +1,12 @@
-use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use blossom::contract::{OpenBoard, ReplicaState};
-use blossom::replica::{Replica, replica_file};
-use blossom::{BoardAccess, OpenBoardFollower, Pacing, copy_board, follow_feed};
+use blossom::replica::replica_file;
+use blossom::{BoardAccess, KeepingEnded, OpenBoardFollower, Pacing, keep_in_step};
 use tauri::async_runtime::JoinHandle;
 use tauri::ipc::{Channel, IpcResponse};
 use tauri::webview::PageLoadEvent;
@@ -42,6 +42,7 @@ struct Session {
     following_open_board: RunningTask,
     forwarding_replica_state: RunningTask,
     keeping_in_step: RunningTask,
+    open_board_gone: AtomicBool,
 }
 
 impl Session {
@@ -53,6 +54,7 @@ impl Session {
             following_open_board: RunningTask::default(),
             forwarding_replica_state: RunningTask::default(),
             keeping_in_step: RunningTask::default(),
+            open_board_gone: AtomicBool::new(false),
         }
     }
 
@@ -69,48 +71,20 @@ impl Session {
     }
 
     async fn keep_in_step(&self, access: BoardAccess) {
-        let Some(replicas_folder) = self.replicas_folder.clone() else {
+        let Some(replicas_folder) = self.replicas_folder.as_deref() else {
             eprintln!("blossom: there is no data folder to keep the replica in");
             return;
         };
-        let file = replica_file(&replicas_folder, &access);
-        let opened = tauri::async_runtime::spawn_blocking(move || {
-            fs::create_dir_all(&replicas_folder).map_err(|error| error.to_string())?;
-            Replica::open(&file).map_err(|error| error.to_string())
+        let file = replica_file(replicas_folder, &access);
+        let ended = keep_in_step(&access, &file, Pacing::for_the_app(), |state| {
+            self.replica_state.send_replace(Some(state));
         })
         .await;
-        let replica = match opened {
-            Ok(Ok(replica)) => replica,
-            Ok(Err(error)) => {
-                eprintln!("blossom: the replica could not be opened: {error}");
-                return;
+        match ended {
+            KeepingEnded::BoardGone => self.open_board_gone.store(true, Ordering::SeqCst),
+            KeepingEnded::Stopped(error) => {
+                eprintln!("blossom: the replica stopped: {error}");
             }
-            Err(error) => {
-                eprintln!("blossom: the replica could not be opened: {error}");
-                return;
-            }
-        };
-        let report_state = |state| {
-            self.replica_state.send_replace(Some(state));
-        };
-        let pacing = Pacing::for_the_app();
-        let copied = match copy_board(&access, replica, pacing, report_state).await {
-            Ok(copied) => copied,
-            Err(error) => {
-                eprintln!("blossom: the board could not be copied: {error}");
-                return;
-            }
-        };
-        let followed = follow_feed(
-            &access,
-            copied.replica,
-            copied.feed_cursor,
-            pacing,
-            report_state,
-        )
-        .await;
-        if let Err(error) = followed {
-            eprintln!("blossom: the board's feed could not be followed: {error}");
         }
     }
 }
@@ -135,6 +109,9 @@ async fn follow_open_board(channel: Channel<OpenBoard>, session: Arc<Session>) {
     };
     let mut follower = OpenBoardFollower::new(token_folder);
     loop {
+        if session.open_board_gone.swap(false, Ordering::SeqCst) {
+            follower.forget_the_open_board();
+        }
         if let Some(open_board) = follower.look().await {
             match follower.access_to_open_board() {
                 Some(access) => session.start_keeping_in_step(access.clone()),

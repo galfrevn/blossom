@@ -10,7 +10,6 @@ use crate::contract::Person;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-const SILENCE_THAT_ENDS_A_STREAM: Duration = Duration::from_secs(45);
 
 #[derive(Deserialize)]
 pub(crate) struct FeedEvent {
@@ -37,14 +36,21 @@ pub fn client() -> Option<Client> {
         .ok()
 }
 
-pub fn reading_client() -> Option<Client> {
+pub fn reading_client(longest_silence: Duration) -> Option<Client> {
     Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
-        .read_timeout(SILENCE_THAT_ENDS_A_STREAM)
+        .read_timeout(longest_silence)
         .no_proxy()
         .redirect(Policy::none())
         .build()
         .ok()
+}
+
+pub async fn board_still_answers(access: &BoardAccess) -> bool {
+    let Some(client) = client() else {
+        return false;
+    };
+    discovery_names_its_own_url(&client, access).await && person_on(&client, access).await.is_some()
 }
 
 pub async fn discovery_names_its_own_url(client: &Client, access: &BoardAccess) -> bool {

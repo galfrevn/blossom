@@ -1,12 +1,12 @@
+use std::convert::Infallible;
 use std::fmt;
-use std::time::Duration;
 
 use reqwest::{Client, Response};
 use tokio::time::Instant;
 
 use crate::access::BoardAccess;
-use crate::contract::ReplicaState;
-use crate::pacing::Pacing;
+use crate::contract::{ReplicaState, StopReason};
+use crate::pacing::{Pacing, Retries};
 use crate::protocol::{self, FeedEvent};
 use crate::replica::{MessageView, Replica};
 use crate::sse::{EventStreamReader, Frame};
@@ -17,6 +17,7 @@ pub enum FollowError {
     NoHttpClient,
     InvalidEvent(serde_json::Error),
     Storage(StorageError),
+    BoardGone,
 }
 
 impl fmt::Display for FollowError {
@@ -30,11 +31,21 @@ impl fmt::Display for FollowError {
                 )
             }
             FollowError::Storage(error) => write!(formatter, "{error}"),
+            FollowError::BoardGone => write!(formatter, "the board stopped answering"),
         }
     }
 }
 
 impl std::error::Error for FollowError {}
+
+impl FollowError {
+    pub(crate) fn stop_reason(&self) -> StopReason {
+        match self {
+            FollowError::Storage(_) => StopReason::UnwritableReplica,
+            _ => StopReason::UnreadableBoard,
+        }
+    }
+}
 
 pub async fn follow_feed(
     access: &BoardAccess,
@@ -42,22 +53,37 @@ pub async fn follow_feed(
     from_cursor: String,
     pacing: Pacing,
     mut report: impl FnMut(ReplicaState),
-) -> Result<(), FollowError> {
-    let client = protocol::reading_client().ok_or(FollowError::NoHttpClient)?;
+) -> Result<Infallible, FollowError> {
+    let client =
+        protocol::reading_client(pacing.longest_silence).ok_or(FollowError::NoHttpClient)?;
     let mut stored = replica.message_count();
     let mut cursor = from_cursor;
-    let mut pause = pacing.first_pause();
+    let mut retries = Retries::new(pacing, access);
     loop {
-        let Some(mut stream) = open_stream(&client, access, &cursor).await else {
+        let opening = open_stream(&client, access, &cursor);
+        let opened = tokio::time::timeout(pacing.longest_wait_for_a_stream, opening).await;
+        let Ok(Some(mut stream)) = opened else {
             report(ReplicaState::Reconnecting { stored });
-            pause = wait_before_reconnecting(pause, &pacing).await;
+            retries
+                .wait_after_failure()
+                .await
+                .map_err(|_| FollowError::BoardGone)?;
             continue;
         };
         report(ReplicaState::Live { stored });
         let opened_at = Instant::now();
         let cursor_when_opened = cursor.clone();
         let mut reader = EventStreamReader::default();
-        while let Ok(Some(bytes)) = stream.chunk().await {
+        let mut stream_failed = false;
+        loop {
+            let bytes = match stream.chunk().await {
+                Ok(Some(bytes)) => bytes,
+                Ok(None) => break,
+                Err(_) => {
+                    stream_failed = true;
+                    break;
+                }
+            };
             let frames = reader.read(&bytes);
             if frames.is_empty() {
                 continue;
@@ -77,19 +103,17 @@ pub async fn follow_feed(
             report(ReplicaState::Live { stored });
         }
         let ended_at_once_without_progress =
-            cursor == cursor_when_opened && opened_at.elapsed() < pacing.first_pause();
-        if ended_at_once_without_progress {
+            cursor == cursor_when_opened && opened_at.elapsed() < pacing.first_pause;
+        if stream_failed || ended_at_once_without_progress {
             report(ReplicaState::Reconnecting { stored });
-            pause = wait_before_reconnecting(pause, &pacing).await;
+            retries
+                .wait_after_failure()
+                .await
+                .map_err(|_| FollowError::BoardGone)?;
         } else {
-            pause = pacing.first_pause();
+            retries.succeeded();
         }
     }
-}
-
-async fn wait_before_reconnecting(pause: Duration, pacing: &Pacing) -> Duration {
-    tokio::time::sleep(pause).await;
-    pacing.pause_after(pause)
 }
 
 async fn open_stream(client: &Client, access: &BoardAccess, cursor: &str) -> Option<Response> {
