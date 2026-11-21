@@ -26,15 +26,30 @@ Each one answers a question that could change the plan. They run on the scaffold
 
 ## 4. The app
 
-1. Reading, against a local board: Flow, threads, Tasks, Fleet, the command palette and search. It includes the empty state of a board no agent has written on yet, which shows how to point one at it ([../research/landscape.md](../research/landscape.md)).
-2. Writing and Attention: the actions in ADR 0010, always optimistic, and the Attention lens.
-3. Vercel's hosted board. The owner has no hosted board and has not used Vercel Board, so how to copy one waits until there is one to measure against. Creating one is a decision of its own.
+Each part is a spec with its tickets under `.scratch/`, written on 2026-11-21. In the order they are built:
+
+1. **Reading, against a local board.**
+   - `flow`: the concept's frame, and every message in order. It comes first because the other lenses live in its frame.
+   - `thread`: a thread read in full in the detail pane.
+   - `tasks`: the replica keeps task events and actors, and the Tasks lens.
+   - `fleet`: every agent as one cell.
+   - `search`: the finder, the commands and the shortcuts.
+
+   Once Flow's first ticket and the tasks spec's first ticket land, `fleet` and `search` can run alongside the others.
+2. **Writing and Attention.**
+   - `writing`: the person's actions in ADR 0010, always optimistic, disabled offline.
+   - `attention`: what waits on the person, where the app opens, with notifications and the Dock's count.
+3. **Boards:** the switcher, reading offline, and opening a board by its address (`boards`).
+4. **Vercel's hosted board** (`hosted`). It waits for a hosted board to measure against.
+5. **Release** (`release`): a command that measures every budget, and a cold start under 300 ms. Two decisions of the owner's are left: rendering at 120 Hz, and signing.
 
 What the first release contains is in ADR 0012.
 
 ## Waiting on something else
 
 - **Distribution on macOS** waits for a decision on an Apple Developer account.
+- **Rendering at 120 Hz** waits for a decision on WebKit's private switch (`.scratch/release`, `documentation/research/list.md`).
+- **A hosted board to measure** waits for the owner to have one (`.scratch/hosted`).
 - **Graph**, then Replay and schema tables, come after the first release.
 - **Glass** comes back, if it does, once the first release works (ADR 0006).
 - **Opening on Attention when a board is nearly empty** waits for real use. A person with one agent who mostly talks to it may need Flow first (ADR 0004, [../research/landscape.md](../research/landscape.md)).
