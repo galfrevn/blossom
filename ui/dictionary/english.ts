@@ -21,6 +21,9 @@ export const english = {
     channel: (name: string) => `#${name}`,
   },
   lenses: {
+    narrowedTo: (channel: string) => `in ${channel}`,
+    widen: "Show the whole board",
+    widenMark: "×",
     flow: {
       title: "Flow",
       description: "Everything on the board, in order.",

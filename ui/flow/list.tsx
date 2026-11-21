@@ -5,6 +5,7 @@ import { FlowLine } from "./line";
 import { useLayoutAfterDrawing, useScrollFollowing } from "./scroll";
 import {
   followTheChange,
+  followTheTotal,
   type ListState,
   newBelowOf,
   rangeOnScreen,
@@ -75,16 +76,27 @@ function NewBelow({
 
 export function FlowList({
   change,
+  channel,
   readFlow,
 }: {
   change: FlowChange | undefined;
-  readFlow: (start: number, count: number) => Promise<FlowWindow>;
+  channel: string | null;
+  readFlow: (
+    channel: string | null,
+    start: number,
+    count: number,
+  ) => Promise<FlowWindow>;
 }) {
   const [, redraw] = useReducer((count: number) => count + 1, 0);
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
-  const state = useListState(readFlow, redraw);
+  const readThisFlow = useCallback(
+    (start: number, count: number) => readFlow(channel, start, count),
+    [readFlow, channel],
+  );
+  const state = useListState(readThisFlow, redraw);
   followTheChange(state, change);
+  followTheTotal(state);
   const range = rangeOnScreen(state);
   if (range.last >= range.first) {
     state.windows.need(range.first, range.last);

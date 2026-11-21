@@ -13,6 +13,7 @@ export class FlowWindows {
   private readonly blocks = new Map<number, Block>();
   private readonly requested = new Map<number, number>();
   private generation = 0;
+  private knownTotal: number | undefined;
 
   constructor(
     read: (start: number, count: number) => Promise<FlowWindow>,
@@ -52,12 +53,17 @@ export class FlowWindows {
     this.generation += 1;
   }
 
+  total(): number | undefined {
+    return this.knownTotal;
+  }
+
   private request(block: number): void {
     const { generation } = this;
     this.requested.set(block, generation);
     this.read(block * this.blockSize, this.blockSize).then(
       (window) => {
         this.requested.delete(block);
+        this.knownTotal = window.total;
         this.blocks.delete(block);
         this.blocks.set(block, { rows: window.rows, generation });
         this.letGoOfTheOldest();

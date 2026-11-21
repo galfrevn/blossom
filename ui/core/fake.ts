@@ -23,6 +23,13 @@ function createFakeSubscription<Value>() {
   };
 }
 
+function isWithin(channel: string, narrowedTo: string | null): boolean {
+  if (narrowedTo === null) {
+    return true;
+  }
+  return channel === narrowedTo || channel.startsWith(`${narrowedTo}/`);
+}
+
 export type FakeCore = {
   core: Core;
   pushOpenBoard: (openBoard: OpenBoard) => void;
@@ -44,12 +51,16 @@ export function createFakeCore(): FakeCore {
       subscribeToReplica: replica.subscribe,
       subscribeToChannels: channels.subscribe,
       subscribeToFlow: flow.subscribe,
-      readFlow: (start, count) =>
-        Promise.resolve({
-          total: flowRows.length,
+      readFlow: (channel, start, count) => {
+        const narrowed = flowRows.filter((row) =>
+          isWithin(row.channel, channel),
+        );
+        return Promise.resolve({
+          total: narrowed.length,
           start,
-          rows: flowRows.slice(start, start + count),
-        }),
+          rows: narrowed.slice(start, start + count),
+        });
+      },
     },
     pushOpenBoard: openBoard.push,
     pushReplicaState: replica.push,
@@ -57,7 +68,7 @@ export function createFakeCore(): FakeCore {
     pushFlow: (rows) => {
       flowRows = rows;
       flowRevision += 1;
-      flow.push({ total: rows.length, revision: flowRevision });
+      flow.push({ revision: flowRevision });
     },
   };
 }

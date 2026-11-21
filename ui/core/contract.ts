@@ -10,4 +10,4 @@ export type FlowRow = { id: string, channel: string, author: string, onBehalfOf:
 
 export type FlowWindow = { total: number, start: number, rows: Array<FlowRow>, };
 
-export type FlowChange = { total: number, revision: number, };
+export type FlowChange = { revision: number, };

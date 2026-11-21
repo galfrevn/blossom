@@ -16,7 +16,7 @@ afterEach(cleanup);
 
 const SOMEONE_ACTING_FOR_A_PERSON = /^via /u;
 
-function renderFlowOf(rows: FlowRow[]) {
+function renderFlowOf(rows: FlowRow[], channel: string | null = null) {
   const fakeCore = createFakeCore();
   let latestChange: FlowChange | undefined;
   fakeCore.core.subscribeToFlow((change) => {
@@ -24,14 +24,22 @@ function renderFlowOf(rows: FlowRow[]) {
   });
   fakeCore.pushFlow(rows);
   const { rerender } = render(
-    <FlowList change={latestChange} readFlow={fakeCore.core.readFlow} />,
+    <FlowList
+      change={latestChange}
+      channel={channel}
+      readFlow={fakeCore.core.readFlow}
+    />,
   );
   return {
     pushFlow: (newRows: FlowRow[]) => {
       fakeCore.pushFlow(newRows);
       act(() => {
         rerender(
-          <FlowList change={latestChange} readFlow={fakeCore.core.readFlow} />,
+          <FlowList
+            change={latestChange}
+            channel={channel}
+            readFlow={fakeCore.core.readFlow}
+          />,
         );
       });
     },
@@ -229,4 +237,23 @@ test("at the bottom, new messages arrive without a count", async () => {
     expect(flowList().getAllByRole("article")).toHaveLength(2);
   });
   expect(screen.queryByRole("button")).toBeNull();
+});
+
+test("a channel narrows Flow to it and to every channel under it", async () => {
+  renderFlowOf(
+    [
+      messageInFlow({ id: "1", channel: "fleet/www" }),
+      messageInFlow({ id: "2", channel: "general" }),
+      messageInFlow({ id: "3", channel: "fleet" }),
+      messageInFlow({ id: "4", channel: "fleetwide" }),
+    ],
+    "fleet",
+  );
+
+  await waitFor(() => {
+    const shown = flowList()
+      .getAllByRole("article")
+      .map((message) => message.getAttribute("data-message"));
+    expect(shown).toEqual(["1", "3"]);
+  });
 });

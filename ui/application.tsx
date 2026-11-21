@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import type {
   FlowChange,
   FlowWindow,
@@ -24,12 +25,26 @@ export function Application({
   replicaStore: Store<ReplicaState>;
   channelsStore: Store<string[]>;
   flowStore: Store<FlowChange>;
-  readFlow: (start: number, count: number) => Promise<FlowWindow>;
+  readFlow: (
+    channel: string | null,
+    start: number,
+    count: number,
+  ) => Promise<FlowWindow>;
 }) {
   const openBoard = useStore(openBoardStore);
   const replicaState = useStore(replicaStore);
   const channels = useStore(channelsStore);
   const flowChange = useStore(flowStore);
+  const [chosenChannel, setChosenChannel] = useState<string | null>(null);
+  const chooseChannel = useCallback((channel: string) => {
+    setChosenChannel((current) => {
+      if (current === channel) {
+        return null;
+      }
+      return channel;
+    });
+  }, []);
+  const showTheWholeBoard = useCallback(() => setChosenChannel(null), []);
   return (
     <div className="flex h-screen flex-col bg-paper text-ink">
       <TitleBar />
@@ -40,13 +55,25 @@ export function Application({
       )}
       {openBoard?.kind === "open" && (
         <div className="flex min-h-0 flex-1">
-          <Sidebar channels={channels ?? []} />
+          <Sidebar
+            channels={channels ?? []}
+            chosenChannel={chosenChannel}
+            onChooseChannel={chooseChannel}
+            onChooseFlow={showTheWholeBoard}
+          />
           <main className="flex min-w-0 flex-1 flex-col">
             <LensHeader
               title={dictionary.lenses.flow.title}
               description={dictionary.lenses.flow.description}
+              channel={chosenChannel}
+              onWiden={showTheWholeBoard}
             />
-            <FlowList change={flowChange} readFlow={readFlow} />
+            <FlowList
+              key={chosenChannel ?? ""}
+              change={flowChange}
+              channel={chosenChannel}
+              readFlow={readFlow}
+            />
           </main>
         </div>
       )}

@@ -82,6 +82,5 @@ pub struct FlowWindow {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 pub struct FlowChange {
-    pub total: u32,
     pub revision: u32,
 }

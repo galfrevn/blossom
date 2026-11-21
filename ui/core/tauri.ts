@@ -36,7 +36,7 @@ export function createTauriCore(): Core {
       subscribeOverChannel<string[]>("subscribe_to_channels", listener),
     subscribeToFlow: (listener) =>
       subscribeOverChannel<FlowChange>("subscribe_to_flow", listener),
-    readFlow: (start, count) =>
-      invoke<FlowWindow>("read_flow", { start, count }),
+    readFlow: (channel, start, count) =>
+      invoke<FlowWindow>("read_flow", { channel, start, count }),
   };
 }

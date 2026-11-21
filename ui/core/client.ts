@@ -14,5 +14,9 @@ export type Core = {
   ) => () => void;
   subscribeToChannels: (listener: (channels: string[]) => void) => () => void;
   subscribeToFlow: (listener: (change: FlowChange) => void) => () => void;
-  readFlow: (start: number, count: number) => Promise<FlowWindow>;
+  readFlow: (
+    channel: string | null,
+    start: number,
+    count: number,
+  ) => Promise<FlowWindow>;
 };

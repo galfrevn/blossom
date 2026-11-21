@@ -33,11 +33,19 @@ export function followTheChange(
     return;
   }
   state.revision = change.revision;
-  if (change.total !== state.heights.count) {
-    state.heights = state.heights.resized(change.total);
-  }
   state.heights.forgetMeasurements();
   state.windows.renew();
+}
+
+export function followTheTotal(state: ListState) {
+  const total = state.windows.total();
+  if (total === undefined) {
+    state.windows.need(0, 0);
+    return;
+  }
+  if (total !== state.heights.count) {
+    state.heights = state.heights.resized(total);
+  }
 }
 
 export function rangeOnScreen(state: ListState) {

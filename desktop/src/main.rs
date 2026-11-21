@@ -116,10 +116,7 @@ impl Session {
             .flow_revision
             .fetch_add(1, Ordering::SeqCst)
             .wrapping_add(1);
-        self.flow.send_replace(Some(FlowChange {
-            total: reader.flow_total(),
-            revision,
-        }));
+        self.flow.send_replace(Some(FlowChange { revision }));
         match reader.channels() {
             Ok(channels) => {
                 self.channels.send_if_modified(|current| {
@@ -134,13 +131,18 @@ impl Session {
         }
     }
 
-    fn read_flow(&self, start: u32, count: u32) -> Result<FlowWindow, String> {
+    fn read_flow(
+        &self,
+        channel: Option<&str>,
+        start: u32,
+        count: u32,
+    ) -> Result<FlowWindow, String> {
         let reader = self.reader.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(reader) = reader.as_ref() else {
             return Err(String::from("no replica is open"));
         };
         reader
-            .flow_window(start, count)
+            .flow_window_in(channel, start, count)
             .map_err(|error| error.to_string())
     }
 
@@ -191,13 +193,13 @@ fn subscribe_to_flow(channel: Channel<FlowChange>, session: State<'_, Arc<Sessio
 
 #[tauri::command]
 fn read_flow(
+    channel: Option<String>,
     start: u32,
     count: u32,
     session: State<'_, Arc<Session>>,
 ) -> Result<FlowWindow, String> {
-    session.read_flow(start, count)
+    session.read_flow(channel.as_deref(), start, count)
 }
-
 #[tauri::command]
 fn subscribe_to_channels(channel: Channel<Vec<String>>, session: State<'_, Arc<Session>>) {
     let receiver = session.channels.subscribe();

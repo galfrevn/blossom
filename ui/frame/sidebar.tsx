@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useCallback, useId } from "react";
 import { dictionary } from "../dictionary";
 
 const INDENT_FOR_EACH_DEPTH = [
@@ -92,7 +92,56 @@ function Heading({ id, children }: { id: string; children: string }) {
   );
 }
 
-export function Sidebar({ channels }: { channels: string[] }) {
+function currentnessOf(isCurrent: boolean): "true" | "false" {
+  if (isCurrent) {
+    return "true";
+  }
+  return "false";
+}
+
+function lensCurrentnessOf(chosenChannel: string | null): "page" | "false" {
+  if (chosenChannel === null) {
+    return "page";
+  }
+  return "false";
+}
+
+const NAVIGATION_ROW =
+  "flex w-full items-center gap-[9px] rounded-[5px] py-[5px] pr-2 text-left text-[12.5px] text-ink-2 hover:bg-sunken hover:text-ink aria-[current=page]:bg-accent-wash aria-[current=page]:text-ink aria-[current=true]:bg-accent-wash aria-[current=true]:text-ink";
+
+function ChannelButton({
+  row,
+  isChosen,
+  onChoose,
+}: {
+  row: ChannelRow;
+  isChosen: boolean;
+  onChoose: (channel: string) => void;
+}) {
+  const choose = useCallback(() => onChoose(row.path), [onChoose, row.path]);
+  return (
+    <button
+      type="button"
+      aria-current={currentnessOf(isChosen)}
+      onClick={choose}
+      className={`${NAVIGATION_ROW} ${indentOf(row.depth)}`}
+    >
+      <span className="min-w-0 flex-1 truncate">{labelOf(row)}</span>
+    </button>
+  );
+}
+
+export function Sidebar({
+  channels,
+  chosenChannel,
+  onChooseChannel,
+  onChooseFlow,
+}: {
+  channels: string[];
+  chosenChannel: string | null;
+  onChooseChannel: (channel: string) => void;
+  onChooseFlow: () => void;
+}) {
   const text = dictionary.sidebar;
   const lensesHeading = useId();
   const channelsHeading = useId();
@@ -101,14 +150,18 @@ export function Sidebar({ channels }: { channels: string[] }) {
       <section>
         <Heading id={lensesHeading}>{text.lenses}</Heading>
         <ul aria-labelledby={lensesHeading} className="flex flex-col gap-px">
-          <li
-            aria-current="page"
-            className="flex items-center gap-[9px] rounded-[5px] bg-accent-wash px-2 py-[5px] text-[12.5px] text-ink"
-          >
-            <FlowIcon />
-            <span className="min-w-0 flex-1 truncate">
-              {dictionary.lenses.flow.title}
-            </span>
+          <li>
+            <button
+              type="button"
+              aria-current={lensCurrentnessOf(chosenChannel)}
+              onClick={onChooseFlow}
+              className={`${NAVIGATION_ROW} pl-2`}
+            >
+              <FlowIcon />
+              <span className="min-w-0 flex-1 truncate">
+                {dictionary.lenses.flow.title}
+              </span>
+            </button>
           </li>
         </ul>
       </section>
@@ -116,12 +169,12 @@ export function Sidebar({ channels }: { channels: string[] }) {
         <Heading id={channelsHeading}>{text.channels}</Heading>
         <ul aria-labelledby={channelsHeading} className="flex flex-col gap-px">
           {rowsOfTheTree(channels).map((row) => (
-            <li
-              key={row.path}
-              data-depth={row.depth}
-              className={`truncate rounded-[5px] py-[5px] pr-2 text-[12.5px] text-ink-2 ${indentOf(row.depth)}`}
-            >
-              {labelOf(row)}
+            <li key={row.path} data-depth={row.depth}>
+              <ChannelButton
+                row={row}
+                isChosen={row.path === chosenChannel}
+                onChoose={onChooseChannel}
+              />
             </li>
           ))}
         </ul>

@@ -126,7 +126,7 @@ fn the_flow_is_every_message_oldest_first() {
         .unwrap();
 
     let reader = ReplicaReader::open(&file).unwrap();
-    let window = reader.flow_window(0, 10).unwrap();
+    let window = reader.flow_window_in(None, 0, 10).unwrap();
 
     assert_eq!(window.total, 3);
     assert_eq!(window.start, 0);
@@ -144,8 +144,8 @@ fn a_window_is_read_at_any_depth() {
     replica.apply(&views).unwrap();
 
     let reader = ReplicaReader::open(&file).unwrap();
-    let window = reader.flow_window(250, 3).unwrap();
-    let past_the_end = reader.flow_window(299, 10).unwrap();
+    let window = reader.flow_window_in(None, 250, 3).unwrap();
+    let past_the_end = reader.flow_window_in(None, 299, 10).unwrap();
 
     assert_eq!(ids_of(&window), vec!["250", "251", "252"]);
     assert_eq!(ids_of(&past_the_end), vec!["299"]);
@@ -175,7 +175,7 @@ fn a_message_that_arrives_takes_its_place_once_the_reader_catches_up() {
 
     assert!(caught_up);
     assert_eq!(
-        ids_of(&reader.flow_window(0, 10).unwrap()),
+        ids_of(&reader.flow_window_in(None, 0, 10).unwrap()),
         vec!["1", "2", "3", "4"]
     );
     assert!(!reader.catch_up().unwrap());
@@ -199,7 +199,7 @@ fn an_edited_message_reads_as_it_stands_now() {
     replica
         .apply(&[MessageView::parse(&edited.to_string()).unwrap()])
         .unwrap();
-    let row = reader.flow_window(0, 1).unwrap().rows.remove(0);
+    let row = reader.flow_window_in(None, 0, 1).unwrap().rows.remove(0);
 
     assert_eq!(row.text, "deploy failed, rolled back");
     assert!(row.edited);
@@ -216,7 +216,7 @@ fn a_row_says_who_wrote_it_and_for_whom() {
 
     let row = ReplicaReader::open(&file)
         .unwrap()
-        .flow_window(0, 1)
+        .flow_window_in(None, 0, 1)
         .unwrap()
         .rows
         .remove(0);
@@ -242,13 +242,13 @@ fn the_first_message_of_each_minute_starts_it() {
     let reader = ReplicaReader::open(&file).unwrap();
 
     let whole: Vec<bool> = reader
-        .flow_window(0, 3)
+        .flow_window_in(None, 0, 3)
         .unwrap()
         .rows
         .iter()
         .map(|row| row.first_of_its_minute)
         .collect();
-    let from_the_middle = reader.flow_window(1, 2).unwrap().rows.remove(0);
+    let from_the_middle = reader.flow_window_in(None, 1, 2).unwrap().rows.remove(0);
 
     assert_eq!(whole, vec![true, false, true]);
     assert!(!from_the_middle.first_of_its_minute);
@@ -269,10 +269,102 @@ fn a_deleted_message_reads_as_deleted() {
 
     let row = ReplicaReader::open(&file)
         .unwrap()
-        .flow_window(0, 1)
+        .flow_window_in(None, 0, 1)
         .unwrap()
         .rows
         .remove(0);
 
     assert!(row.deleted);
+}
+
+fn view_in_at(channel: &str, id: &str, minute: u32) -> Result<MessageView, serde_json::Error> {
+    let board_view = json!({
+        "id": id,
+        "channel": channel,
+        "thread": format!("thread-of-{id}"),
+        "createdAt": format!("2026-11-21T10:{minute:02}:00.000Z"),
+        "version": 1,
+        "text": "work"
+    });
+    MessageView::parse(&board_view.to_string())
+}
+
+#[test]
+fn a_channel_narrows_the_flow_to_itself_and_every_channel_under_it() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&[
+            view_in_at("fleet/www", "1", 0).unwrap(),
+            view_in_at("general", "2", 1).unwrap(),
+            view_in_at("fleet", "3", 2).unwrap(),
+            view_in_at("fleetwide", "4", 3).unwrap(),
+            view_in_at("fleet/api/v2", "5", 4).unwrap(),
+        ])
+        .unwrap();
+    let reader = ReplicaReader::open(&file).unwrap();
+
+    let fleet = reader.flow_window_in(Some("fleet"), 0, 10).unwrap();
+    let general = reader.flow_window_in(Some("general"), 0, 10).unwrap();
+
+    assert_eq!(ids_of(&fleet), vec!["1", "3", "5"]);
+    assert_eq!(fleet.total, 3);
+    assert_eq!(ids_of(&general), vec!["2"]);
+}
+
+#[test]
+fn a_narrowed_flow_reads_windows_and_minutes_within_its_channel() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&[
+            view_in_at("fleet/www", "1", 0).unwrap(),
+            view_in_at("general", "2", 1).unwrap(),
+            view_in_at("fleet/www", "3", 1).unwrap(),
+            view_in_at("fleet/www", "4", 2).unwrap(),
+        ])
+        .unwrap();
+    let reader = ReplicaReader::open(&file).unwrap();
+
+    let window = reader.flow_window_in(Some("fleet/www"), 1, 10).unwrap();
+
+    assert_eq!(window.start, 1);
+    assert_eq!(ids_of(&window), vec!["3", "4"]);
+    let firsts: Vec<bool> = window
+        .rows
+        .iter()
+        .map(|row| row.first_of_its_minute)
+        .collect();
+    assert_eq!(firsts, vec![true, true]);
+}
+
+#[test]
+fn a_narrowed_flow_follows_new_messages_in_its_channel() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&[view_in_at("fleet/www", "1", 0).unwrap()])
+        .unwrap();
+    let mut reader = ReplicaReader::open(&file).unwrap();
+    assert_eq!(
+        reader.flow_window_in(Some("fleet"), 0, 10).unwrap().total,
+        1
+    );
+
+    replica
+        .apply(&[
+            view_in_at("fleet/docs", "2", 1).unwrap(),
+            view_in_at("general", "3", 2).unwrap(),
+        ])
+        .unwrap();
+    reader.catch_up().unwrap();
+
+    assert_eq!(
+        ids_of(&reader.flow_window_in(Some("fleet"), 0, 10).unwrap()),
+        vec!["1", "2"]
+    );
+    assert_eq!(reader.flow_window_in(None, 0, 10).unwrap().total, 3);
 }
