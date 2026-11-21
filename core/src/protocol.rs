@@ -1,19 +1,44 @@
 use std::time::Duration;
 
-use reqwest::Client;
 use reqwest::redirect::Policy;
+use reqwest::{Client, Url};
 use serde::Deserialize;
-use serde_json::value::RawValue;
 
 use crate::access::BoardAccess;
 use crate::contract::Person;
+use crate::replica::Actor;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+pub(crate) const ACTORS_PER_REQUEST: usize = 100;
 
 #[derive(Deserialize)]
-pub(crate) struct FeedEvent {
-    pub(crate) message: Option<Box<RawValue>>,
+pub(crate) struct ListedActors {
+    pub(crate) actors: Vec<Actor>,
+}
+
+pub(crate) fn actors_query(asked_ids: &[String]) -> Vec<(&'static str, &str)> {
+    asked_ids.iter().map(|id| ("id", id.as_str())).collect()
+}
+
+pub(crate) async fn listed_actors(
+    client: &Client,
+    access: &BoardAccess,
+    asked_ids: &[String],
+) -> Option<Vec<Actor>> {
+    let mut address = Url::parse(&format!("{}/actors", access.url())).ok()?;
+    address
+        .query_pairs_mut()
+        .extend_pairs(actors_query(asked_ids));
+    let response = client
+        .get(address)
+        .bearer_auth(access.token())
+        .send()
+        .await
+        .ok()?;
+    let accepted_response = response.error_for_status().ok()?;
+    let listed: ListedActors = accepted_response.json().await.ok()?;
+    Some(listed.actors)
 }
 
 #[derive(Deserialize)]

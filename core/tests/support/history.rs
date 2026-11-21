@@ -15,85 +15,367 @@ pub const FRAMES_PER_STREAM: usize = 2;
 const PAUSE_WHEN_CAUGHT_UP: Duration = Duration::from_millis(20);
 pub const SLOW_PAGE: Duration = Duration::from_millis(2500);
 const STALLED_STREAM: Duration = Duration::from_secs(10);
+const LEASE_MINUTES: u32 = 5;
+
+pub fn time_at(minute: u32) -> String {
+    let hour = 10 + minute / 60;
+    let minute_of_the_hour = minute % 60;
+    format!("2026-11-20T{hour:02}:{minute_of_the_hour:02}:00.000Z")
+}
+
+pub fn lease_until(claimed_at_minute: u32) -> String {
+    time_at(claimed_at_minute + LEASE_MINUTES)
+}
 
 #[derive(Clone)]
-pub struct HistoryEvent {
-    pub message: Value,
-    pub carries_a_message: bool,
-    pub unreadable: bool,
+pub struct FakeActor {
+    pub id: String,
+    principal: String,
+    profile: Option<String>,
+    kind: String,
+    handle: String,
+    name: String,
+    via: Option<String>,
+}
+
+impl FakeActor {
+    pub fn person(handle: &str, name: &str) -> FakeActor {
+        FakeActor {
+            id: format!("local:user:{handle}"),
+            principal: format!("local:user:{handle}"),
+            profile: None,
+            kind: String::from("person"),
+            handle: handle.to_owned(),
+            name: name.to_owned(),
+            via: None,
+        }
+    }
+
+    pub fn agent(profile: &str, person: &str) -> FakeActor {
+        FakeActor {
+            id: format!("local:user:{person}+{profile}"),
+            principal: format!("local:user:{person}"),
+            profile: Some(profile.to_owned()),
+            kind: String::from("agent"),
+            handle: format!("{person}/{profile}"),
+            name: profile.to_owned(),
+            via: Some(person.to_owned()),
+        }
+    }
+
+    pub fn principal(&self) -> &str {
+        &self.principal
+    }
+
+    fn author(&self) -> Value {
+        let mut author = json!({
+            "kind": self.kind,
+            "handle": self.handle,
+            "name": self.name,
+            "avatar": Value::Null
+        });
+        if let Some(via) = &self.via {
+            author["via"] = json!({ "name": via, "environment": Value::Null });
+        }
+        author
+    }
+
+    fn listed(&self) -> Value {
+        let mut listed = self.author();
+        listed["id"] = Value::from(self.id.as_str());
+        listed
+    }
+
+    fn by(&self) -> Value {
+        json!({ "actor": self.id, "principal": self.principal, "profile": self.profile })
+    }
+}
+
+fn the_person_with_the_token() -> FakeActor {
+    FakeActor::person("ada", "Ada Lovelace")
+}
+
+#[derive(Clone)]
+struct DeliveredEvent {
+    event_type: String,
+    created_at: String,
+    payload: Value,
+    actor: Option<FakeActor>,
+    message: Value,
+}
+
+#[derive(Clone)]
+enum HistoryEvent {
+    Delivered(Box<DeliveredEvent>),
+    Bookkeeping,
+    Unreadable,
+}
+
+impl HistoryEvent {
+    fn message(&self) -> Option<&Value> {
+        match self {
+            HistoryEvent::Delivered(delivered) => Some(&delivered.message),
+            HistoryEvent::Bookkeeping | HistoryEvent::Unreadable => None,
+        }
+    }
 }
 
 #[derive(Clone, Default)]
 pub struct BoardHistory {
-    pub events: Vec<HistoryEvent>,
+    events: Vec<HistoryEvent>,
+    actors_known_without_an_event: Vec<FakeActor>,
 }
 
 impl BoardHistory {
     pub fn post(&mut self, id: &str, channel: &str, thread_root: &str, minute: u32, text: &str) {
-        let version = self.events.len() as u64 + 1;
-        self.events.push(HistoryEvent {
-            message: json!({
-                "id": id,
-                "channel": channel,
-                "thread": format!("thread-{thread_root}"),
-                "re": if id == thread_root { Value::Null } else { Value::from(thread_root) },
-                "createdAt": format!("2026-11-20T10:{minute:02}:00.000Z"),
-                "version": version,
-                "text": text
-            }),
-            carries_a_message: true,
-            unreadable: false,
+        let author = the_person_with_the_token();
+        let thread = format!("thread-{thread_root}");
+        let re = if id == thread_root {
+            Value::Null
+        } else {
+            Value::from(thread_root)
+        };
+        let message = json!({
+            "id": id,
+            "channel": channel,
+            "thread": thread,
+            "re": re,
+            "createdAt": time_at(minute),
+            "version": self.next_version(),
+            "text": text,
+            "by": author.by(),
+            "author": author.author()
+        });
+        let payload = json!({
+            "channel": channel,
+            "text": text,
+            "re": re,
+            "thread": thread,
+            "by": author.by()
+        });
+        self.deliver(DeliveredEvent {
+            event_type: String::from("message.posted"),
+            created_at: time_at(minute),
+            payload,
+            actor: Some(author),
+            message,
         });
     }
 
     pub fn edit(&mut self, id: &str, text: &str) {
-        let version = self.events.len() as u64 + 1;
+        let author = the_person_with_the_token();
         let mut message = self.current_view(id);
-        message["version"] = Value::from(version);
+        message["version"] = Value::from(self.next_version());
         message["text"] = Value::from(text);
-        self.events.push(HistoryEvent {
+        let created_at = message["createdAt"].as_str().unwrap_or_default().to_owned();
+        let payload = json!({ "id": id, "text": text, "by": author.by(), "from": Value::Null });
+        self.deliver(DeliveredEvent {
+            event_type: String::from("message.edited"),
+            created_at,
+            payload,
+            actor: Some(author),
             message,
-            carries_a_message: true,
-            unreadable: false,
         });
+    }
+
+    fn deliver(&mut self, delivered: DeliveredEvent) {
+        self.events
+            .push(HistoryEvent::Delivered(Box::new(delivered)));
     }
 
     pub fn bookkeeping(&mut self) {
-        self.events.push(HistoryEvent {
-            message: Value::Null,
-            carries_a_message: false,
-            unreadable: false,
-        });
+        self.events.push(HistoryEvent::Bookkeeping);
     }
 
     pub fn unreadable_event(&mut self) {
-        self.events.push(HistoryEvent {
-            message: Value::Null,
-            carries_a_message: false,
-            unreadable: true,
+        self.events.push(HistoryEvent::Unreadable);
+    }
+
+    pub fn know_actor(&mut self, actor: FakeActor) {
+        self.actors_known_without_an_event.push(actor);
+    }
+
+    pub fn create_task(
+        &mut self,
+        id: &str,
+        by: &FakeActor,
+        minute: u32,
+        assigned_to: Option<&str>,
+        needs: &[&str],
+    ) {
+        let state = if needs.is_empty() { "ready" } else { "waiting" };
+        let task = json!({
+            "state": state,
+            "owner": by.principal,
+            "by": by.id,
+            "for": assigned_to,
+            "needs": needs,
+            "epoch": 0,
+            "claim": Value::Null,
+            "blocked": Value::Null,
+            "result": Value::Null,
+            "reason": Value::Null
         });
+        let payload = json!({ "needs": needs, "for": assigned_to });
+        self.change_task(id, "task.created", minute, Some(by), payload, |root_task| {
+            *root_task = task;
+        });
+    }
+
+    pub fn claim_task(&mut self, id: &str, by: &FakeActor, minute: u32) {
+        let epoch = self.task_epoch(id) + 1;
+        let until = lease_until(minute);
+        let claim = json!({ "actor": by.id, "until": until });
+        let payload = json!({ "epoch": epoch, "until": until });
+        self.change_task(id, "task.claimed", minute, Some(by), payload, |task| {
+            task["state"] = Value::from("claimed");
+            task["epoch"] = Value::from(epoch);
+            task["claim"] = claim;
+        });
+    }
+
+    pub fn release_task(&mut self, id: &str, by: &FakeActor, minute: u32) {
+        let payload = json!({ "epoch": self.task_epoch(id) });
+        self.change_task(id, "task.released", minute, Some(by), payload, |task| {
+            task["state"] = Value::from("ready");
+            task["claim"] = Value::Null;
+        });
+    }
+
+    pub fn expire_task(&mut self, id: &str, minute: u32) {
+        let payload = json!({ "epoch": self.task_epoch(id) });
+        self.change_task(id, "task.expired", minute, None, payload, |task| {
+            task["state"] = Value::from("ready");
+            task["claim"] = Value::Null;
+        });
+    }
+
+    pub fn complete_task(&mut self, id: &str, by: &FakeActor, minute: u32, result: &str) {
+        let payload = json!({ "epoch": self.task_epoch(id), "result": result });
+        self.change_task(id, "task.completed", minute, Some(by), payload, |task| {
+            task["state"] = Value::from("completed");
+            task["claim"] = Value::Null;
+            task["result"] = Value::from(result);
+        });
+    }
+
+    pub fn fail_task(&mut self, id: &str, by: &FakeActor, minute: u32, reason: &str) {
+        let payload = json!({ "epoch": self.task_epoch(id), "reason": reason });
+        self.change_task(id, "task.failed", minute, Some(by), payload, |task| {
+            task["state"] = Value::from("failed");
+            task["claim"] = Value::Null;
+            task["reason"] = Value::from(reason);
+        });
+    }
+
+    pub fn block_task(&mut self, id: &str, by: &FakeActor, minute: u32, kind: &str, reason: &str) {
+        let payload = json!({ "kind": kind, "reason": reason });
+        self.change_task(id, "task.blocked", minute, Some(by), payload, |task| {
+            task["state"] = Value::from("blocked");
+            task["claim"] = Value::Null;
+            task["blocked"] = json!({ "kind": kind, "reason": reason });
+        });
+    }
+
+    pub fn unblock_task(&mut self, id: &str, by: &FakeActor, minute: u32) {
+        self.change_task(id, "task.unblocked", minute, Some(by), json!({}), |task| {
+            task["state"] = Value::from("ready");
+            task["blocked"] = Value::Null;
+        });
+    }
+
+    pub fn reopen_task(&mut self, id: &str, by: &FakeActor, minute: u32) {
+        self.change_task(id, "task.reopened", minute, Some(by), json!({}), |task| {
+            task["state"] = Value::from("ready");
+            task["reason"] = Value::Null;
+        });
+    }
+
+    pub fn cancel_task(&mut self, id: &str, by: &FakeActor, minute: u32, reason: &str) {
+        let payload = json!({ "reason": reason });
+        self.change_task(id, "task.canceled", minute, Some(by), payload, |task| {
+            task["state"] = Value::from("canceled");
+            task["claim"] = Value::Null;
+            task["reason"] = Value::from(reason);
+        });
+    }
+
+    fn change_task(
+        &mut self,
+        id: &str,
+        event_type: &str,
+        minute: u32,
+        by: Option<&FakeActor>,
+        mut payload: Value,
+        change: impl FnOnce(&mut Value),
+    ) {
+        let mut root = self.current_view(id);
+        root["version"] = Value::from(self.next_version());
+        change(&mut root["task"]);
+        payload["id"] = Value::from(id);
+        payload["thread"] = root["thread"].clone();
+        if let Some(by) = by {
+            payload["by"] = by.by();
+        }
+        self.deliver(DeliveredEvent {
+            event_type: event_type.to_owned(),
+            created_at: time_at(minute),
+            payload,
+            actor: by.cloned(),
+            message: root,
+        });
+    }
+
+    fn task_epoch(&self, id: &str) -> u64 {
+        self.current_view(id)["task"]["epoch"]
+            .as_u64()
+            .unwrap_or_default()
+    }
+
+    fn next_version(&self) -> u64 {
+        self.events.len() as u64 + 1
     }
 
     pub fn current_view(&self, id: &str) -> Value {
         self.events
             .iter()
             .rev()
-            .find(|event| event.carries_a_message && event.message["id"] == id)
-            .map(|event| event.message.clone())
+            .filter_map(HistoryEvent::message)
+            .find(|message| message["id"] == id)
+            .cloned()
             .unwrap_or(Value::Null)
     }
 
     fn current_views(&self) -> BTreeMap<String, Value> {
         let mut views = BTreeMap::new();
-        for event in self.events.iter().filter(|event| event.carries_a_message) {
-            let id = event.message["id"].as_str().unwrap_or_default().to_owned();
-            views.insert(id, event.message.clone());
+        for message in self.events.iter().filter_map(HistoryEvent::message) {
+            let id = message["id"].as_str().unwrap_or_default().to_owned();
+            views.insert(id, message.clone());
         }
         views
     }
 
+    fn listed_actors(&self) -> BTreeMap<String, FakeActor> {
+        let mut listed = BTreeMap::new();
+        let actors_who_acted = self.events.iter().filter_map(|event| match event {
+            HistoryEvent::Delivered(delivered) => delivered.actor.as_ref(),
+            HistoryEvent::Bookkeeping | HistoryEvent::Unreadable => None,
+        });
+        for actor in actors_who_acted {
+            listed.insert(actor.id.clone(), actor.clone());
+        }
+        for actor in &self.actors_known_without_an_event {
+            listed.insert(actor.id.clone(), actor.clone());
+        }
+        listed
+    }
+
     fn cursor_of(position: usize) -> String {
         format!("event-{position}")
+    }
+
+    fn latest_cursor(&self) -> String {
+        Self::cursor_of(self.events.len().saturating_sub(1))
     }
 
     fn position_after(&self, cursor: &str) -> Option<usize> {
@@ -101,11 +383,25 @@ impl BoardHistory {
             return position.parse::<usize>().ok().map(|position| position + 1);
         }
         let posted_at = self.events.iter().position(|event| {
-            event.carries_a_message
-                && event.message["id"] == cursor
-                && event.message["re"].is_null()
+            event
+                .message()
+                .is_some_and(|message| message["id"] == cursor && message["re"].is_null())
         });
         posted_at.map(|position| position + 1)
+    }
+
+    fn served_event(position: usize, delivered: &DeliveredEvent) -> Value {
+        let mut served = json!({
+            "cursor": Self::cursor_of(position),
+            "type": delivered.event_type,
+            "createdAt": delivered.created_at,
+            "payload": delivered.payload,
+            "message": delivered.message
+        });
+        if let Some(actor) = &delivered.actor {
+            served["actor"] = actor.listed();
+        }
+        served
     }
 
     fn thread_around(&self, id: &str) -> Option<Value> {
@@ -113,7 +409,7 @@ impl BoardHistory {
         if message.is_null() {
             return None;
         }
-        let cursor = Self::cursor_of(self.events.len().saturating_sub(1));
+        let cursor = self.latest_cursor();
         Some(json!({ "message": message, "replies": [], "cursor": cursor, "schedules": [] }))
     }
 
@@ -147,7 +443,7 @@ impl BoardHistory {
         };
         json!({
             "threads": threads,
-            "cursor": Self::cursor_of(self.events.len().saturating_sub(1)),
+            "cursor": self.latest_cursor(),
             "older": older
         })
     }
@@ -165,23 +461,34 @@ impl BoardHistory {
         json!({ "channels": channels, "cursor": "channels", "next": Value::Null })
     }
 
+    fn actors_page(&self, asked_ids: &[String]) -> Value {
+        let listed = self.listed_actors();
+        let mut answered: Vec<&FakeActor> = listed
+            .values()
+            .filter(|actor| asked_ids.contains(&actor.id))
+            .collect();
+        answered.sort_by(|first, second| first.handle.cmp(&second.handle));
+        let actors: Vec<Value> = answered.iter().map(|actor| actor.listed()).collect();
+        json!({ "actors": actors, "cursor": self.latest_cursor() })
+    }
+
     fn events_stream(&self, after: &str) -> Option<(String, Vec<usize>)> {
         let first = self.position_after(after)?;
         let last = (first + FRAMES_PER_STREAM).min(self.events.len());
         let mut body = format!(": connected\n\nid: {after}\n\n");
         for (position, event) in self.events.iter().enumerate().take(last).skip(first) {
             let cursor = Self::cursor_of(position);
-            if event.unreadable {
-                body.push_str(&format!("id: {cursor}\nevent: board\ndata: not json\n\n"));
-            } else if event.carries_a_message {
-                let data = json!({
-                    "cursor": cursor,
-                    "type": "message.posted",
-                    "message": event.message
-                });
-                body.push_str(&format!("id: {cursor}\nevent: board\ndata: {data}\n\n"));
-            } else {
-                body.push_str(&format!("id: {cursor}\n\n"));
+            match event {
+                HistoryEvent::Delivered(delivered) => {
+                    let data = Self::served_event(position, delivered);
+                    body.push_str(&format!("id: {cursor}\nevent: board\ndata: {data}\n\n"));
+                }
+                HistoryEvent::Bookkeeping => {
+                    body.push_str(&format!("id: {cursor}\n\n"));
+                }
+                HistoryEvent::Unreadable => {
+                    body.push_str(&format!("id: {cursor}\nevent: board\ndata: not json\n\n"));
+                }
             }
         }
         Some((body, (first..last).collect()))
@@ -191,13 +498,9 @@ impl BoardHistory {
         let first = self.position_after(after)?;
         let last = (first + EVENTS_PER_PAGE).min(self.events.len());
         let events: Vec<Value> = (first..last)
-            .filter(|position| self.events[*position].carries_a_message)
-            .map(|position| {
-                json!({
-                    "cursor": Self::cursor_of(position),
-                    "type": "message.posted",
-                    "message": self.events[position].message
-                })
+            .filter_map(|position| match &self.events[position] {
+                HistoryEvent::Delivered(delivered) => Some(Self::served_event(position, delivered)),
+                HistoryEvent::Bookkeeping | HistoryEvent::Unreadable => None,
             })
             .collect();
         let cursor = if last > first {
@@ -319,6 +622,7 @@ impl Respond for HistoryResponder {
             .query_pairs()
             .map(|(key, value)| (key.into_owned(), value.into_owned()))
             .collect();
+        let asked_ids = asked_actor_ids(request);
         let history = self
             .board
             .history
@@ -328,6 +632,7 @@ impl Respond for HistoryResponder {
         let body = match path {
             "/api/board/threads" => history.threads_page(query.get("before").map(String::as_str)),
             "/api/board/channels" => history.channels_page(),
+            "/api/board/actors" => history.actors_page(&asked_ids),
             "/api/board/events" => match query.get("after").map(|after| history.events_page(after))
             {
                 Some(Some(page)) => page,
@@ -348,6 +653,15 @@ impl Respond for HistoryResponder {
         }
         response
     }
+}
+
+pub fn asked_actor_ids(request: &Request) -> Vec<String> {
+    request
+        .url
+        .query_pairs()
+        .filter(|(key, _)| key == "id")
+        .map(|(_, value)| value.into_owned())
+        .collect()
 }
 
 fn refused_cursor() -> ResponseTemplate {
@@ -374,7 +688,7 @@ pub async fn serve_board(server: &MockServer, board: FakeBoard) {
     answer_me(server, "token-of-ada", "ada", "Ada Lovelace").await;
     Mock::given(method("GET"))
         .and(path_regex(
-            "^/api/board/(threads|channels|events|messages/[^/]+)$",
+            "^/api/board/(threads|channels|events|actors|messages/[^/]+)$",
         ))
         .respond_with(HistoryResponder { board })
         .mount(server)

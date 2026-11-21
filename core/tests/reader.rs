@@ -1,6 +1,5 @@
 use blossom::reader::ReplicaReader;
-use blossom::replica::{MessageView, Replica};
-use rusqlite::Connection;
+use blossom::replica::{Batch, MessageView, Replica};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -22,12 +21,12 @@ fn the_channels_are_every_channel_the_replica_holds_a_message_in() {
     let file = folder.path().join("board.sqlite");
     let mut replica = Replica::open(&file).unwrap();
     replica
-        .apply(&[
+        .apply(&Batch::from_views(vec![
             view_in("fleet/www", "1").unwrap(),
             view_in("general", "2").unwrap(),
             view_in("fleet/api", "3").unwrap(),
             view_in("fleet/www", "4").unwrap(),
-        ])
+        ]))
         .unwrap();
 
     let reader = ReplicaReader::open(&file).unwrap();
@@ -43,40 +42,18 @@ fn a_channel_appears_to_the_reader_once_a_message_arrives_in_it() {
     let folder = TempDir::new().unwrap();
     let file = folder.path().join("board.sqlite");
     let mut replica = Replica::open(&file).unwrap();
-    replica.apply(&[view_in("general", "1").unwrap()]).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![view_in("general", "1").unwrap()]))
+        .unwrap();
     let reader = ReplicaReader::open(&file).unwrap();
 
     replica
-        .apply(&[view_in("fleet/docs", "2").unwrap()])
+        .apply(&Batch::from_views(vec![
+            view_in("fleet/docs", "2").unwrap(),
+        ]))
         .unwrap();
 
     assert_eq!(reader.channels().unwrap(), vec!["fleet/docs", "general"]);
-}
-
-#[test]
-fn a_replica_copied_before_channels_were_kept_still_lists_them() {
-    let folder = TempDir::new().unwrap();
-    let file = folder.path().join("board.sqlite");
-    let older = Connection::open(&file).unwrap();
-    older
-        .execute_batch(
-            "CREATE TABLE messages (
-                 id TEXT PRIMARY KEY,
-                 channel TEXT NOT NULL,
-                 thread TEXT NOT NULL,
-                 created_at TEXT NOT NULL,
-                 version INTEGER NOT NULL,
-                 view TEXT NOT NULL
-             ) WITHOUT ROWID;
-             INSERT INTO messages VALUES ('1', 'fleet/www', 't', '2026-11-21T10:00:00.000Z', 1, '{}');",
-        )
-        .unwrap();
-    drop(older);
-
-    Replica::open(&file).unwrap();
-    let reader = ReplicaReader::open(&file).unwrap();
-
-    assert_eq!(reader.channels().unwrap(), vec!["fleet/www"]);
 }
 
 #[test]
@@ -118,11 +95,11 @@ fn the_flow_is_every_message_oldest_first() {
     let file = folder.path().join("board.sqlite");
     let mut replica = Replica::open(&file).unwrap();
     replica
-        .apply(&[
+        .apply(&Batch::from_views(vec![
             view_at("3", 2, 0, "third").unwrap(),
             view_at("1", 0, 0, "first").unwrap(),
             view_at("2", 1, 0, "second").unwrap(),
-        ])
+        ]))
         .unwrap();
 
     let reader = ReplicaReader::open(&file).unwrap();
@@ -141,7 +118,7 @@ fn a_window_is_read_at_any_depth() {
     let views: Vec<MessageView> = (0..300)
         .map(|index| view_at(&format!("{index:03}"), index / 60, index % 60, "work").unwrap())
         .collect();
-    replica.apply(&views).unwrap();
+    replica.apply(&Batch::from_views(views)).unwrap();
 
     let reader = ReplicaReader::open(&file).unwrap();
     let window = reader.flow_window_in(None, 250, 3).unwrap();
@@ -158,18 +135,18 @@ fn a_message_that_arrives_takes_its_place_once_the_reader_catches_up() {
     let file = folder.path().join("board.sqlite");
     let mut replica = Replica::open(&file).unwrap();
     replica
-        .apply(&[
+        .apply(&Batch::from_views(vec![
             view_at("1", 0, 0, "first").unwrap(),
             view_at("3", 2, 0, "third").unwrap(),
-        ])
+        ]))
         .unwrap();
     let mut reader = ReplicaReader::open(&file).unwrap();
 
     replica
-        .apply(&[
+        .apply(&Batch::from_views(vec![
             view_at("4", 3, 0, "newest").unwrap(),
             view_at("2", 1, 0, "late").unwrap(),
-        ])
+        ]))
         .unwrap();
     let caught_up = reader.catch_up().unwrap();
 
@@ -187,7 +164,9 @@ fn an_edited_message_reads_as_it_stands_now() {
     let file = folder.path().join("board.sqlite");
     let mut replica = Replica::open(&file).unwrap();
     replica
-        .apply(&[view_at("1", 0, 0, "deploy failed").unwrap()])
+        .apply(&Batch::from_views(vec![
+            view_at("1", 0, 0, "deploy failed").unwrap(),
+        ]))
         .unwrap();
     let reader = ReplicaReader::open(&file).unwrap();
 
@@ -197,7 +176,9 @@ fn an_edited_message_reads_as_it_stands_now() {
         "text": "deploy failed, rolled back", "editedAt": "2026-11-21T10:05:00.000Z"
     });
     replica
-        .apply(&[MessageView::parse(&edited.to_string()).unwrap()])
+        .apply(&Batch::from_views(vec![
+            MessageView::parse(&edited.to_string()).unwrap(),
+        ]))
         .unwrap();
     let row = reader.flow_window_in(None, 0, 1).unwrap().rows.remove(0);
 
@@ -211,7 +192,9 @@ fn a_row_says_who_wrote_it_and_for_whom() {
     let file = folder.path().join("board.sqlite");
     let mut replica = Replica::open(&file).unwrap();
     replica
-        .apply(&[view_at("1", 0, 0, "on it").unwrap()])
+        .apply(&Batch::from_views(vec![
+            view_at("1", 0, 0, "on it").unwrap(),
+        ]))
         .unwrap();
 
     let row = ReplicaReader::open(&file)
@@ -233,11 +216,11 @@ fn the_first_message_of_each_minute_starts_it() {
     let file = folder.path().join("board.sqlite");
     let mut replica = Replica::open(&file).unwrap();
     replica
-        .apply(&[
+        .apply(&Batch::from_views(vec![
             view_at("1", 0, 5, "a").unwrap(),
             view_at("2", 0, 40, "b").unwrap(),
             view_at("3", 1, 2, "c").unwrap(),
-        ])
+        ]))
         .unwrap();
     let reader = ReplicaReader::open(&file).unwrap();
 
@@ -264,7 +247,9 @@ fn a_deleted_message_reads_as_deleted() {
         "createdAt": "2026-11-21T10:00:00.000Z", "version": 3, "text": "", "deleted": true
     });
     replica
-        .apply(&[MessageView::parse(&deleted.to_string()).unwrap()])
+        .apply(&Batch::from_views(vec![
+            MessageView::parse(&deleted.to_string()).unwrap(),
+        ]))
         .unwrap();
 
     let row = ReplicaReader::open(&file)
@@ -295,13 +280,13 @@ fn a_channel_narrows_the_flow_to_itself_and_every_channel_under_it() {
     let file = folder.path().join("board.sqlite");
     let mut replica = Replica::open(&file).unwrap();
     replica
-        .apply(&[
+        .apply(&Batch::from_views(vec![
             view_in_at("fleet/www", "1", 0).unwrap(),
             view_in_at("general", "2", 1).unwrap(),
             view_in_at("fleet", "3", 2).unwrap(),
             view_in_at("fleetwide", "4", 3).unwrap(),
             view_in_at("fleet/api/v2", "5", 4).unwrap(),
-        ])
+        ]))
         .unwrap();
     let reader = ReplicaReader::open(&file).unwrap();
 
@@ -319,12 +304,12 @@ fn a_narrowed_flow_reads_windows_and_minutes_within_its_channel() {
     let file = folder.path().join("board.sqlite");
     let mut replica = Replica::open(&file).unwrap();
     replica
-        .apply(&[
+        .apply(&Batch::from_views(vec![
             view_in_at("fleet/www", "1", 0).unwrap(),
             view_in_at("general", "2", 1).unwrap(),
             view_in_at("fleet/www", "3", 1).unwrap(),
             view_in_at("fleet/www", "4", 2).unwrap(),
-        ])
+        ]))
         .unwrap();
     let reader = ReplicaReader::open(&file).unwrap();
 
@@ -346,7 +331,9 @@ fn a_narrowed_flow_follows_new_messages_in_its_channel() {
     let file = folder.path().join("board.sqlite");
     let mut replica = Replica::open(&file).unwrap();
     replica
-        .apply(&[view_in_at("fleet/www", "1", 0).unwrap()])
+        .apply(&Batch::from_views(vec![
+            view_in_at("fleet/www", "1", 0).unwrap(),
+        ]))
         .unwrap();
     let mut reader = ReplicaReader::open(&file).unwrap();
     assert_eq!(
@@ -355,10 +342,10 @@ fn a_narrowed_flow_follows_new_messages_in_its_channel() {
     );
 
     replica
-        .apply(&[
+        .apply(&Batch::from_views(vec![
             view_in_at("fleet/docs", "2", 1).unwrap(),
             view_in_at("general", "3", 2).unwrap(),
-        ])
+        ]))
         .unwrap();
     reader.catch_up().unwrap();
 

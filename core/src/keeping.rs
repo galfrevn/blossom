@@ -14,7 +14,7 @@ use crate::feed::{FollowError, follow_feed};
 use crate::pacing::{Pacing, Retries};
 use crate::protocol;
 use crate::replica::{
-    BoardIdentity, Replica, known_replica_files, new_replica_file, replica_file_for,
+    BoardIdentity, Replica, ReplicaError, known_replica_files, new_replica_file, replica_file_for,
 };
 
 pub enum KeepingEnded {
@@ -167,9 +167,18 @@ async fn start_from_a_known_replica(
         retries: Retries::new(pacing, access),
     };
     for file in known_files {
-        let known = open_known_replica(file.clone())
+        let opened = open_known_replica(file.clone())
             .await
             .map_err(Interrupted::unwritable)?;
+        let known = match opened {
+            KnownReplicaOpening::Opened(known) => known,
+            KnownReplicaOpening::MadeWithAnotherSchema => {
+                discard_replica(file)
+                    .await
+                    .map_err(Interrupted::unwritable)?;
+                continue;
+            }
+        };
         let (Some(identity), Some(feed_cursor)) = (known.identity, known.feed_cursor) else {
             continue;
         };
@@ -225,16 +234,27 @@ struct KnownReplica {
     feed_cursor: Option<String>,
 }
 
-async fn open_known_replica(file: PathBuf) -> Result<KnownReplica, String> {
+enum KnownReplicaOpening {
+    Opened(KnownReplica),
+    MadeWithAnotherSchema,
+}
+
+async fn open_known_replica(file: PathBuf) -> Result<KnownReplicaOpening, String> {
     on_storage_thread(move || {
-        let replica = Replica::open(&file).map_err(|error| error.to_string())?;
+        let replica = match Replica::open(&file) {
+            Ok(replica) => replica,
+            Err(ReplicaError::AnotherSchemaVersion(_)) => {
+                return Ok(KnownReplicaOpening::MadeWithAnotherSchema);
+            }
+            Err(error) => return Err(error.to_string()),
+        };
         let identity = replica.identity().map_err(|error| error.to_string())?;
         let feed_cursor = replica.feed_cursor().map_err(|error| error.to_string())?;
-        Ok(KnownReplica {
+        Ok(KnownReplicaOpening::Opened(KnownReplica {
             replica,
             identity,
             feed_cursor,
-        })
+        }))
     })
     .await
 }
@@ -274,8 +294,9 @@ async fn name_replica(
 
 async fn discard_replica(file: PathBuf) -> Result<(), String> {
     on_storage_thread(move || {
-        remove_replica_files(&file)
-            .map_err(|error| format!("a refused replica could not be removed: {error}"))
+        remove_replica_files(&file).map_err(|error| {
+            format!("a replica that cannot be followed on could not be removed: {error}")
+        })
     })
     .await
 }

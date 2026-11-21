@@ -2,6 +2,8 @@
 mod answers;
 #[path = "support/history.rs"]
 mod history;
+#[path = "support/outdated.rs"]
+mod outdated;
 
 use std::convert::Infallible;
 use std::error::Error;
@@ -9,12 +11,15 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use blossom::contract::{ReplicaState, StopReason};
-use blossom::replica::Replica;
+use blossom::replica::{Actor, Batch, BoardIdentity, Claim, Replica, Via, replica_file_for};
 use blossom::{
     BoardAccess, CopiedBoard, FollowError, KeepingEnded, Pacing, copy_board, follow_feed,
     keep_in_step,
 };
-use history::{BoardHistory, FakeBoard, serve_board};
+use history::{
+    BoardHistory, FakeActor, FakeBoard, asked_actor_ids, lease_until, serve_board, time_at,
+};
+use outdated::write_a_replica_from_before_task_events;
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -35,6 +40,7 @@ fn history_across_two_channels() -> BoardHistory {
 }
 
 struct Copy {
+    server: MockServer,
     _folder: TempDir,
     copied: CopiedBoard,
     reported_states: Vec<ReplicaState>,
@@ -68,6 +74,7 @@ async fn copy_from(board: &FakeBoard) -> Result<Copy, Box<dyn Error>> {
     .await?;
 
     Ok(Copy {
+        server,
         _folder: folder,
         copied,
         reported_states,
@@ -186,7 +193,7 @@ async fn a_page_slower_than_a_quick_answer_is_waited_for() {
 }
 
 struct Following {
-    _server: MockServer,
+    server: MockServer,
     _folder: TempDir,
     file: PathBuf,
     states: UnboundedReceiver<ReplicaState>,
@@ -222,7 +229,7 @@ async fn copy_then_follow_at(
         .await
     });
     Ok(Following {
-        _server: server,
+        server,
         _folder: folder,
         file,
         states,
@@ -657,7 +664,7 @@ async fn a_refused_cursor_copies_the_board_again() {
     let file = replica_files(first.folder.path()).unwrap().remove(0);
     let mut replica = Replica::open(&file).unwrap();
     replica
-        .apply_from_feed(&[], "a-cursor-the-board-never-gave")
+        .apply_from_feed(&Batch::default(), "a-cursor-the-board-never-gave")
         .unwrap();
     drop(replica);
 
@@ -752,4 +759,378 @@ async fn the_replica_being_kept_is_announced_once_it_is_named_after_its_board() 
 
     let files = replica_files(folder.path()).unwrap();
     assert_eq!(files, vec![announced_file]);
+}
+
+fn julian() -> FakeActor {
+    FakeActor::person("julian", "Julian Benegas")
+}
+
+fn triage() -> FakeActor {
+    FakeActor::agent("triage", "julian")
+}
+
+fn claude() -> FakeActor {
+    FakeActor::agent("claude", "julian")
+}
+
+fn codex() -> FakeActor {
+    FakeActor::agent("codex", "julian")
+}
+
+const DEPLOYER_NO_ONE_LISTS: &str = "local:user:julian+deployer";
+
+fn history_of_every_task_change() -> BoardHistory {
+    let mut history = BoardHistory::default();
+    history.know_actor(julian());
+    history.post("10", "work", "10", 0, "fix CVE-123 in acme/web");
+    history.post("11", "work", "11", 1, "review the fix for CVE-123");
+    history.post("12", "work", "12", 2, "rotate the deploy keys");
+    history.post("13", "work", "13", 3, "deploy acme/web to production");
+    history.create_task("10", &triage(), 4, None, &[]);
+    history.claim_task("10", &claude(), 5);
+    history.block_task("10", &claude(), 6, "needs_input", "which version?");
+    history.unblock_task("10", &triage(), 7);
+    history.claim_task("10", &claude(), 8);
+    history.fail_task("10", &claude(), 9, "the tests fail");
+    history.reopen_task("10", &triage(), 10);
+    history.claim_task("10", &codex(), 11);
+    history.complete_task("10", &codex(), 12, "fixed in a1b2c3, tests pass");
+    history.create_task("11", &triage(), 13, None, &[]);
+    history.claim_task("11", &claude(), 14);
+    history.expire_task("11", 20);
+    history.claim_task("11", &claude(), 21);
+    history.create_task("12", &triage(), 22, None, &[]);
+    history.claim_task("12", &codex(), 23);
+    history.release_task("12", &codex(), 24);
+    history.cancel_task("12", &triage(), 25, "superseded by the nightly rotation");
+    history.create_task("13", &triage(), 26, Some(DEPLOYER_NO_ONE_LISTS), &["11"]);
+    history
+}
+
+#[derive(Debug, PartialEq)]
+struct TaskChange {
+    event_type: String,
+    actor: Option<String>,
+    created_at: String,
+}
+
+fn changes_of(replica: &Replica, task: &str) -> Result<Vec<TaskChange>, Box<dyn Error>> {
+    let changes = replica
+        .task_events(task)?
+        .into_iter()
+        .map(|event| TaskChange {
+            event_type: event.event_type,
+            actor: event.actor,
+            created_at: event.created_at,
+        })
+        .collect();
+    Ok(changes)
+}
+
+fn change(event_type: &str, actor: Option<&FakeActor>, minute: u32) -> TaskChange {
+    TaskChange {
+        event_type: String::from(event_type),
+        actor: actor.map(|actor| actor.id.clone()),
+        created_at: time_at(minute),
+    }
+}
+
+async fn actor_ids_asked_for(server: &MockServer) -> Vec<String> {
+    let requests = server.received_requests().await.unwrap_or_default();
+    requests
+        .iter()
+        .filter(|request| request.url.path() == "/api/board/actors")
+        .flat_map(asked_actor_ids)
+        .collect()
+}
+
+#[tokio::test]
+async fn every_task_change_is_copied_as_a_task_event_with_its_actor_and_time() {
+    let copy = copy_of(&history_of_every_task_change()).await.unwrap();
+    let replica = &copy.copied.replica;
+
+    assert_eq!(
+        changes_of(replica, "10").unwrap(),
+        vec![
+            change("task.created", Some(&triage()), 4),
+            change("task.claimed", Some(&claude()), 5),
+            change("task.blocked", Some(&claude()), 6),
+            change("task.unblocked", Some(&triage()), 7),
+            change("task.claimed", Some(&claude()), 8),
+            change("task.failed", Some(&claude()), 9),
+            change("task.reopened", Some(&triage()), 10),
+            change("task.claimed", Some(&codex()), 11),
+            change("task.completed", Some(&codex()), 12),
+        ]
+    );
+    assert_eq!(
+        changes_of(replica, "11").unwrap(),
+        vec![
+            change("task.created", Some(&triage()), 13),
+            change("task.claimed", Some(&claude()), 14),
+            change("task.expired", None, 20),
+            change("task.claimed", Some(&claude()), 21),
+        ]
+    );
+    assert_eq!(
+        changes_of(replica, "12").unwrap(),
+        vec![
+            change("task.created", Some(&triage()), 22),
+            change("task.claimed", Some(&codex()), 23),
+            change("task.released", Some(&codex()), 24),
+            change("task.canceled", Some(&triage()), 25),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn the_fields_of_each_task_change_are_copied() {
+    let copy = copy_of(&history_of_every_task_change()).await.unwrap();
+    let replica = &copy.copied.replica;
+
+    let fixing = replica.task_events("10").unwrap();
+    let rotating = replica.task_events("12").unwrap();
+    let deploying = replica.task_events("13").unwrap();
+    assert_eq!(fixing[2].reason.as_deref(), Some("which version?"));
+    assert_eq!(fixing[2].payload["kind"], "needs_input");
+    assert_eq!(fixing[5].reason.as_deref(), Some("the tests fail"));
+    assert_eq!(
+        fixing[8].result.as_deref(),
+        Some("fixed in a1b2c3, tests pass")
+    );
+    assert_eq!(
+        rotating[3].reason.as_deref(),
+        Some("superseded by the nightly rotation")
+    );
+    assert_eq!(
+        deploying[0].assigned_to.as_deref(),
+        Some(DEPLOYER_NO_ONE_LISTS)
+    );
+    assert_eq!(deploying[0].needs, Some(vec![String::from("11")]));
+}
+
+#[tokio::test]
+async fn the_task_index_is_copied_as_each_task_stands_now() {
+    let copy = copy_of(&history_of_every_task_change()).await.unwrap();
+    let replica = &copy.copied.replica;
+
+    let fixing = replica.task("10").unwrap().unwrap();
+    let reviewing = replica.task("11").unwrap().unwrap();
+    let rotating = replica.task("12").unwrap().unwrap();
+    let deploying = replica.task("13").unwrap().unwrap();
+    assert_eq!(fixing.state, "completed");
+    assert_eq!(fixing.channel, "work");
+    assert_eq!(fixing.owner, triage().principal());
+    assert_eq!(fixing.made_as, triage().id);
+    assert_eq!(
+        fixing.result.as_deref(),
+        Some("fixed in a1b2c3, tests pass")
+    );
+    assert_eq!(fixing.claim, None);
+    assert_eq!(fixing.latest_event_at, Some(time_at(12)));
+    assert_eq!(reviewing.state, "claimed");
+    assert_eq!(
+        reviewing.claim,
+        Some(Claim {
+            actor: claude().id,
+            until: lease_until(21),
+        })
+    );
+    assert_eq!(rotating.state, "canceled");
+    assert_eq!(
+        rotating.reason.as_deref(),
+        Some("superseded by the nightly rotation")
+    );
+    assert_eq!(deploying.state, "waiting");
+    assert_eq!(
+        deploying.assigned_to.as_deref(),
+        Some(DEPLOYER_NO_ONE_LISTS)
+    );
+    assert_eq!(deploying.needs, vec![String::from("11")]);
+    assert_eq!(deploying.latest_event_at, Some(time_at(26)));
+}
+
+#[tokio::test]
+async fn the_actors_behind_task_changes_and_messages_are_copied() {
+    let copy = copy_of(&history_of_every_task_change()).await.unwrap();
+    let replica = &copy.copied.replica;
+
+    assert_eq!(
+        replica.actor(&claude().id).unwrap(),
+        Some(Actor {
+            id: claude().id,
+            kind: String::from("agent"),
+            handle: String::from("julian/claude"),
+            name: String::from("claude"),
+            via: Some(Via {
+                name: String::from("julian"),
+                environment: None,
+            }),
+        })
+    );
+    assert_eq!(
+        replica.actor("local:user:ada").unwrap().unwrap().name,
+        "Ada Lovelace"
+    );
+}
+
+#[tokio::test]
+async fn an_owner_never_seen_in_an_event_is_asked_for_by_its_id() {
+    let copy = copy_of(&history_of_every_task_change()).await.unwrap();
+
+    assert!(
+        actor_ids_asked_for(&copy.server)
+            .await
+            .contains(&julian().id)
+    );
+    assert_eq!(
+        copy.copied.replica.actor(&julian().id).unwrap(),
+        Some(Actor {
+            id: julian().id,
+            kind: String::from("person"),
+            handle: String::from("julian"),
+            name: String::from("Julian Benegas"),
+            via: None,
+        })
+    );
+}
+
+#[tokio::test]
+async fn an_actor_the_board_does_not_list_is_asked_for_once() {
+    let board = FakeBoard::with_history(history_of_every_task_change());
+    let mut following = copy_then_follow(&board).await.unwrap();
+
+    board.change_history(|history| {
+        history.block_task("13", &triage(), 30, "awaiting_approval", "deploy now?");
+        history.unblock_task("13", &triage(), 31);
+        history.post("14", "work", "13", 32, "approved");
+    });
+
+    assert!(until_reported(&mut following.states, &ReplicaState::Live { stored: 5 }).await);
+    following.task.abort();
+    let asked_for_the_deployer = actor_ids_asked_for(&following.server)
+        .await
+        .into_iter()
+        .filter(|id| id == DEPLOYER_NO_ONE_LISTS)
+        .count();
+    assert_eq!(asked_for_the_deployer, 1);
+    let replica = Replica::open(&following.file).unwrap();
+    assert_eq!(replica.actor(DEPLOYER_NO_ONE_LISTS).unwrap(), None);
+    assert_eq!(replica.task_events("13").unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn task_changes_while_followed_reach_the_replica() {
+    let board = FakeBoard::with_history(history_of_every_task_change());
+    let mut following = copy_then_follow(&board).await.unwrap();
+
+    board.change_history(|history| {
+        history.complete_task("11", &claude(), 30, "reviewed, looks good");
+        history.post("14", "work", "11", 31, "merged");
+    });
+
+    assert!(until_reported(&mut following.states, &ReplicaState::Live { stored: 5 }).await);
+    following.task.abort();
+    let replica = Replica::open(&following.file).unwrap();
+    let reviewing = replica.task("11").unwrap().unwrap();
+    assert_eq!(reviewing.state, "completed");
+    assert_eq!(reviewing.claim, None);
+    assert_eq!(reviewing.result.as_deref(), Some("reviewed, looks good"));
+    assert_eq!(reviewing.latest_event_at, Some(time_at(30)));
+    assert_eq!(
+        changes_of(&replica, "11").unwrap().last(),
+        Some(&change("task.completed", Some(&claude()), 30))
+    );
+}
+
+fn grace() -> FakeActor {
+    FakeActor::person("grace", "Grace Hopper")
+}
+
+fn builder() -> FakeActor {
+    FakeActor::agent("builder", "grace")
+}
+
+fn a_task_made_by_a_new_agent(history: &mut BoardHistory) {
+    history.know_actor(grace());
+    history.post("14", "docs", "14", 30, "build the docs");
+    history.create_task("14", &builder(), 31, None, &[]);
+    history.post("15", "docs", "14", 32, "building");
+}
+
+#[tokio::test]
+async fn actors_first_seen_while_followed_are_kept_and_unseen_owners_asked_for() {
+    let board = FakeBoard::with_history(history_of_every_task_change());
+    let mut following = copy_then_follow(&board).await.unwrap();
+
+    board.change_history(a_task_made_by_a_new_agent);
+
+    assert!(until_reported(&mut following.states, &ReplicaState::Live { stored: 6 }).await);
+    following.task.abort();
+    let replica = Replica::open(&following.file).unwrap();
+    assert_eq!(
+        replica.actor(&builder().id).unwrap().unwrap().via,
+        Some(Via {
+            name: String::from("grace"),
+            environment: None,
+        })
+    );
+    assert_eq!(
+        replica.actor(&grace().id).unwrap().unwrap().name,
+        "Grace Hopper"
+    );
+}
+
+#[tokio::test]
+async fn actors_the_board_fails_to_tell_while_followed_are_asked_for_again() {
+    let board = FakeBoard::with_history(history_of_every_task_change());
+    let mut following = copy_then_follow(&board).await.unwrap();
+    board
+        .pages_to_refuse
+        .store(1, std::sync::atomic::Ordering::SeqCst);
+
+    board.change_history(a_task_made_by_a_new_agent);
+
+    assert!(until_reported(&mut following.states, &ReplicaState::Live { stored: 6 }).await);
+    following.task.abort();
+    let replica = Replica::open(&following.file).unwrap();
+    assert_eq!(
+        replica.actor(&grace().id).unwrap().unwrap().name,
+        "Grace Hopper"
+    );
+    assert_eq!(replica.task_events("14").unwrap().len(), 1);
+    assert_eq!(replica.task("14").unwrap().unwrap().owner, grace().id);
+}
+
+#[tokio::test]
+async fn a_replica_made_before_task_events_were_kept_is_copied_again() {
+    let board = FakeBoard::with_history(history_of_every_task_change());
+    let server = MockServer::builder().start().await;
+    serve_board(&server, board.clone()).await;
+    let folder = TempDir::new().unwrap();
+    let access = BoardAccess::new(format!("{}/api/board", server.uri()), "token-of-ada");
+    let identity = BoardIdentity {
+        oldest_id: String::from("10"),
+        oldest_created_at: time_at(0),
+    };
+    let outdated_file = replica_file_for(folder.path(), &access, &identity);
+    write_a_replica_from_before_task_events(
+        &outdated_file,
+        &identity.oldest_id,
+        &identity.oldest_created_at,
+        "event-25",
+    )
+    .unwrap();
+
+    let (mut states, task) = keep_in_step_in(&server, folder.path());
+
+    assert!(until_seen(&mut states, copying).await);
+    assert!(until_reported(&mut states, &ReplicaState::Live { stored: 4 }).await);
+    task.abort();
+    assert_eq!(
+        replica_files(folder.path()).unwrap(),
+        vec![outdated_file.clone()]
+    );
+    let replica = Replica::open(&outdated_file).unwrap();
+    assert_eq!(replica.task("10").unwrap().unwrap().state, "completed");
 }

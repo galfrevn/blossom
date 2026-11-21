@@ -8,8 +8,8 @@ use serde_json::value::RawValue;
 use crate::access::BoardAccess;
 use crate::contract::{ReplicaState, StopReason};
 use crate::pacing::{Pacing, Retries};
-use crate::protocol::{self, FeedEvent};
-use crate::replica::{BoardIdentity, MessageView, Replica};
+use crate::protocol::{self, ListedActors};
+use crate::replica::{Batch, BoardIdentity, MessageView, Replica};
 use crate::storage::{self, StorageError};
 
 const THREADS_PER_PAGE: &str = "500";
@@ -27,6 +27,7 @@ pub enum CopyError {
     InvalidAddress(String),
     Request(reqwest::Error),
     InvalidView(serde_json::Error),
+    InvalidEvent(serde_json::Error),
     Storage(StorageError),
     BoardGone,
 }
@@ -43,6 +44,12 @@ impl fmt::Display for CopyError {
                 write!(
                     formatter,
                     "the board sent a message view the copy cannot read: {error}"
+                )
+            }
+            CopyError::InvalidEvent(error) => {
+                write!(
+                    formatter,
+                    "the board sent an event the copy cannot read: {error}"
                 )
             }
             CopyError::Storage(error) => write!(formatter, "{error}"),
@@ -88,7 +95,7 @@ struct ChannelSummary {
 
 #[derive(Deserialize)]
 struct EventsPage {
-    events: Vec<FeedEvent>,
+    events: Vec<Box<RawValue>>,
     cursor: String,
 }
 
@@ -115,9 +122,12 @@ pub async fn copy_board(
     .await?;
     let identity = threads.oldest_root;
     let mut feed_cursor = threads.feed_cursor;
-    (replica, stored) = storage::store(replica, threads.views, None)
-        .await
-        .map_err(CopyError::Storage)?;
+    let thread_views = Batch::from_views(threads.views);
+    (replica, stored) =
+        store_with_the_actors_it_names(&mut reader, replica, thread_views, &mut || {
+            report(ReplicaState::Reconnecting { stored });
+        })
+        .await?;
     report(ReplicaState::Copying { stored, total });
 
     if let Some(oldest_root) = identity.as_ref() {
@@ -128,16 +138,17 @@ pub async fn copy_board(
                     report(ReplicaState::Reconnecting { stored });
                 })
                 .await?;
-            let views = page
-                .events
-                .iter()
-                .filter_map(|event| event.message.as_deref())
-                .map(|message| MessageView::parse(message.get()))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(CopyError::InvalidView)?;
-            (replica, stored) = storage::store(replica, views, None)
-                .await
-                .map_err(CopyError::Storage)?;
+            let mut events = Batch::default();
+            for event in &page.events {
+                events
+                    .add_event(event.get())
+                    .map_err(CopyError::InvalidEvent)?;
+            }
+            (replica, stored) =
+                store_with_the_actors_it_names(&mut reader, replica, events, &mut || {
+                    report(ReplicaState::Reconnecting { stored });
+                })
+                .await?;
             report(ReplicaState::Copying { stored, total });
             if page.cursor == after {
                 break;
@@ -147,7 +158,7 @@ pub async fn copy_board(
         feed_cursor = after;
     }
 
-    let (replica, _) = storage::store(replica, Vec::new(), Some(feed_cursor.clone()))
+    let (replica, _) = storage::store(replica, Batch::default(), Some(feed_cursor.clone()))
         .await
         .map_err(CopyError::Storage)?;
     Ok(CopiedBoard {
@@ -155,6 +166,27 @@ pub async fn copy_board(
         feed_cursor,
         identity,
     })
+}
+
+async fn store_with_the_actors_it_names(
+    reader: &mut PatientReader<'_>,
+    replica: Replica,
+    mut batch: Batch,
+    on_failure: &mut impl FnMut(),
+) -> Result<(Replica, u32), CopyError> {
+    let named_ids = batch.actor_ids_without_details();
+    let (replica, unseen_ids) = storage::unseen_actors(replica, named_ids)
+        .await
+        .map_err(CopyError::Storage)?;
+    for asked_ids in unseen_ids.chunks(protocol::ACTORS_PER_REQUEST) {
+        let listed: ListedActors = reader
+            .read("/actors", &protocol::actors_query(asked_ids), on_failure)
+            .await?;
+        batch.add_listed_actors(listed.actors, asked_ids);
+    }
+    storage::store(replica, batch, None)
+        .await
+        .map_err(CopyError::Storage)
 }
 
 struct EveryThread {

@@ -8,8 +8,8 @@ use tokio::time::Instant;
 use crate::access::BoardAccess;
 use crate::contract::{ReplicaState, StopReason};
 use crate::pacing::{Pacing, Retries};
-use crate::protocol::{self, FeedEvent};
-use crate::replica::{MessageView, Replica};
+use crate::protocol;
+use crate::replica::{Batch, Replica};
 use crate::sse::{EventStreamReader, Frame};
 use crate::storage::{self, StorageError};
 
@@ -96,16 +96,23 @@ pub async fn follow_feed(
             if frames.is_empty() {
                 continue;
             }
-            let views = views_in(&frames)?;
+            let batch = batch_in(&frames)?;
             let newest_id = frames.iter().rev().find_map(|frame| frame.id.clone());
             let cursor_moved = newest_id.as_ref().is_some_and(|id| *id != cursor);
-            if views.is_empty() && !cursor_moved {
+            if batch.is_empty() && !cursor_moved {
                 continue;
             }
+            let answered_batch;
+            (replica, answered_batch) =
+                with_unseen_actors_asked_for(&client, access, replica, batch).await?;
+            let Some(batch) = answered_batch else {
+                stream_failed = true;
+                break;
+            };
             if let Some(newest_id) = newest_id {
                 cursor = newest_id;
             }
-            (replica, stored) = storage::store(replica, views, Some(cursor.clone()))
+            (replica, stored) = storage::store(replica, batch, Some(cursor.clone()))
                 .await
                 .map_err(FollowError::Storage)?;
             report(ReplicaState::Live { stored });
@@ -163,13 +170,29 @@ async fn open_stream(client: &Client, access: &BoardAccess, cursor: &str) -> Ope
     }
 }
 
-fn views_in(frames: &[Frame]) -> Result<Vec<MessageView>, FollowError> {
-    let mut views = Vec::new();
+fn batch_in(frames: &[Frame]) -> Result<Batch, FollowError> {
+    let mut batch = Batch::default();
     for data in frames.iter().filter_map(|frame| frame.data.as_deref()) {
-        let event: FeedEvent = serde_json::from_str(data).map_err(FollowError::InvalidEvent)?;
-        if let Some(message) = event.message {
-            views.push(MessageView::parse(message.get()).map_err(FollowError::InvalidEvent)?);
-        }
+        batch.add_event(data).map_err(FollowError::InvalidEvent)?;
     }
-    Ok(views)
+    Ok(batch)
+}
+
+async fn with_unseen_actors_asked_for(
+    client: &Client,
+    access: &BoardAccess,
+    replica: Replica,
+    mut batch: Batch,
+) -> Result<(Replica, Option<Batch>), FollowError> {
+    let named_ids = batch.actor_ids_without_details();
+    let (replica, unseen_ids) = storage::unseen_actors(replica, named_ids)
+        .await
+        .map_err(FollowError::Storage)?;
+    for asked_ids in unseen_ids.chunks(protocol::ACTORS_PER_REQUEST) {
+        let Some(listed) = protocol::listed_actors(client, access, asked_ids).await else {
+            return Ok((replica, None));
+        };
+        batch.add_listed_actors(listed, asked_ids);
+    }
+    Ok((replica, Some(batch)))
 }

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::replica::{MessageView, Replica, ReplicaError};
+use crate::replica::{Batch, Replica, ReplicaError};
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -23,16 +23,32 @@ impl std::error::Error for StorageError {}
 
 pub(crate) async fn store(
     mut replica: Replica,
-    views: Vec<MessageView>,
+    batch: Batch,
     feed_cursor: Option<String>,
 ) -> Result<(Replica, u32), StorageError> {
     tokio::task::spawn_blocking(move || {
         match feed_cursor {
-            Some(feed_cursor) => replica.apply_from_feed(&views, &feed_cursor)?,
-            None => replica.apply(&views)?,
+            Some(feed_cursor) => replica.apply_from_feed(&batch, &feed_cursor)?,
+            None => replica.apply(&batch)?,
         }
         let stored = replica.message_count();
         Ok((replica, stored))
+    })
+    .await
+    .map_err(StorageError::Thread)?
+    .map_err(StorageError::Replica)
+}
+
+pub(crate) async fn unseen_actors(
+    replica: Replica,
+    named_ids: Vec<String>,
+) -> Result<(Replica, Vec<String>), StorageError> {
+    if named_ids.is_empty() {
+        return Ok((replica, Vec::new()));
+    }
+    tokio::task::spawn_blocking(move || {
+        let unseen_ids = replica.unseen_actors(&named_ids)?;
+        Ok((replica, unseen_ids))
     })
     .await
     .map_err(StorageError::Thread)?

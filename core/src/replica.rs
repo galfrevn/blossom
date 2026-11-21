@@ -1,14 +1,24 @@
+mod actors;
+mod batch;
+mod tasks;
+
 use std::cmp::Reverse;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::access::BoardAccess;
+use actors::{ActorDetails, AuthorKeys};
+use tasks::RootTask;
+
+pub use actors::{Actor, Via};
+pub use batch::Batch;
+pub use tasks::{Claim, Hold, Task, TaskEvent};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoardIdentity {
@@ -82,6 +92,8 @@ pub struct MessageView {
     created_at: String,
     version: i64,
     json: String,
+    task: Option<RootTask>,
+    author: Option<Actor>,
 }
 
 #[derive(Deserialize)]
@@ -92,11 +104,18 @@ struct MessageViewKeys {
     #[serde(rename = "createdAt")]
     created_at: String,
     version: i64,
+    task: Option<RootTask>,
+    by: Option<AuthorKeys>,
+    author: Option<ActorDetails>,
 }
 
 impl MessageView {
     pub fn parse(json: &str) -> Result<MessageView, serde_json::Error> {
         let keys: MessageViewKeys = serde_json::from_str(json)?;
+        let author = match (keys.by, keys.author) {
+            (Some(by), Some(details)) => Some(details.of_actor(by.actor)),
+            _ => None,
+        };
         Ok(MessageView {
             id: keys.id,
             channel: keys.channel,
@@ -104,6 +123,8 @@ impl MessageView {
             created_at: keys.created_at,
             version: keys.version,
             json: json.to_owned(),
+            task: keys.task,
+            author,
         })
     }
 
@@ -120,6 +141,7 @@ impl MessageView {
 pub enum ReplicaError {
     Storage(rusqlite::Error),
     StoredViewIsNotJson(serde_json::Error),
+    AnotherSchemaVersion(i64),
 }
 
 impl fmt::Display for ReplicaError {
@@ -130,6 +152,12 @@ impl fmt::Display for ReplicaError {
             }
             ReplicaError::StoredViewIsNotJson(error) => {
                 write!(formatter, "a view in the replica is not json: {error}")
+            }
+            ReplicaError::AnotherSchemaVersion(found_version) => {
+                write!(
+                    formatter,
+                    "the replica was made with schema version {found_version}, and this core reads only version {SCHEMA_VERSION}"
+                )
             }
         }
     }
@@ -145,6 +173,105 @@ impl From<rusqlite::Error> for ReplicaError {
 
 const WAIT_FOR_ANOTHER_CONNECTION: Duration = Duration::from_secs(2);
 
+const SCHEMA_VERSION: i64 = 1;
+
+const SCHEMA: &str = "
+    CREATE TABLE messages (
+        id TEXT PRIMARY KEY,
+        channel TEXT NOT NULL,
+        thread TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        view TEXT NOT NULL
+    ) WITHOUT ROWID;
+    CREATE TABLE feed (
+        only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
+        cursor TEXT NOT NULL
+    );
+    CREATE INDEX messages_by_time ON messages (created_at, id);
+    CREATE TABLE arrivals (
+        sequence INTEGER PRIMARY KEY,
+        id TEXT NOT NULL
+    );
+    CREATE TRIGGER arrival_of_a_new_message AFTER INSERT ON messages
+    BEGIN
+        INSERT INTO arrivals (id) VALUES (new.id);
+    END;
+    CREATE TABLE channels (
+        path TEXT PRIMARY KEY
+    ) WITHOUT ROWID;
+    CREATE TRIGGER channel_of_a_new_message AFTER INSERT ON messages
+    BEGIN
+        INSERT OR IGNORE INTO channels (path) VALUES (new.channel);
+    END;
+    CREATE TABLE board (
+        only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
+        oldest_id TEXT NOT NULL,
+        oldest_created_at TEXT NOT NULL
+    );
+    CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        channel TEXT NOT NULL,
+        state TEXT NOT NULL,
+        owner TEXT NOT NULL,
+        made_as TEXT NOT NULL,
+        assigned_to TEXT,
+        claim_actor TEXT,
+        claim_until TEXT,
+        needs TEXT NOT NULL,
+        blocked_kind TEXT,
+        blocked_reason TEXT,
+        result TEXT,
+        reason TEXT,
+        latest_event_at TEXT
+    ) WITHOUT ROWID;
+    CREATE TABLE task_events (
+        position INTEGER PRIMARY KEY,
+        cursor TEXT NOT NULL UNIQUE,
+        event_type TEXT NOT NULL,
+        task TEXT NOT NULL,
+        actor TEXT,
+        created_at TEXT NOT NULL,
+        reason TEXT,
+        result TEXT,
+        assigned_to TEXT,
+        needs TEXT,
+        payload TEXT NOT NULL
+    );
+    CREATE INDEX task_events_by_task ON task_events (task, position);
+    CREATE TABLE actors (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        handle TEXT NOT NULL,
+        name TEXT NOT NULL,
+        via_name TEXT,
+        via_environment TEXT
+    ) WITHOUT ROWID;
+    CREATE TABLE unlisted_actors (
+        id TEXT PRIMARY KEY
+    ) WITHOUT ROWID;
+";
+
+fn make_or_check_the_schema(connection: &mut Connection) -> Result<(), ReplicaError> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let found_version: i64 =
+        transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if found_version == SCHEMA_VERSION {
+        return Ok(());
+    }
+    let holds_any_table: bool =
+        transaction.query_row("SELECT EXISTS (SELECT 1 FROM sqlite_schema)", [], |row| {
+            row.get(0)
+        })?;
+    if holds_any_table {
+        return Err(ReplicaError::AnotherSchemaVersion(found_version));
+    }
+    transaction.execute_batch(SCHEMA)?;
+    transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    transaction.commit()?;
+    Ok(())
+}
+
 pub struct Replica {
     connection: Connection,
     message_count: u32,
@@ -152,48 +279,13 @@ pub struct Replica {
 
 impl Replica {
     pub fn open(file: &Path) -> Result<Replica, ReplicaError> {
-        let connection = Connection::open(file)?;
+        let mut connection = Connection::open(file)?;
         connection.busy_timeout(WAIT_FOR_ANOTHER_CONNECTION)?;
         connection.execute_batch(
             "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             CREATE TABLE IF NOT EXISTS messages (
-                 id TEXT PRIMARY KEY,
-                 channel TEXT NOT NULL,
-                 thread TEXT NOT NULL,
-                 created_at TEXT NOT NULL,
-                 version INTEGER NOT NULL,
-                 view TEXT NOT NULL
-             ) WITHOUT ROWID;
-             CREATE TABLE IF NOT EXISTS feed (
-                 only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
-                 cursor TEXT NOT NULL
-             );
-             CREATE INDEX IF NOT EXISTS messages_by_time ON messages (created_at, id);
-             CREATE TABLE IF NOT EXISTS arrivals (
-                 sequence INTEGER PRIMARY KEY,
-                 id TEXT NOT NULL
-             );
-             CREATE TRIGGER IF NOT EXISTS arrival_of_a_new_message AFTER INSERT ON messages
-             BEGIN
-                 INSERT INTO arrivals (id) VALUES (new.id);
-             END;
-             CREATE TABLE IF NOT EXISTS channels (
-                 path TEXT PRIMARY KEY
-             ) WITHOUT ROWID;
-             CREATE TRIGGER IF NOT EXISTS channel_of_a_new_message AFTER INSERT ON messages
-             BEGIN
-                 INSERT OR IGNORE INTO channels (path) VALUES (new.channel);
-             END;
-             INSERT OR IGNORE INTO channels (path)
-                 SELECT DISTINCT channel FROM messages
-                 WHERE NOT EXISTS (SELECT 1 FROM channels);
-             CREATE TABLE IF NOT EXISTS board (
-                 only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
-                 oldest_id TEXT NOT NULL,
-                 oldest_created_at TEXT NOT NULL
-             );",
+             PRAGMA synchronous = NORMAL;",
         )?;
+        make_or_check_the_schema(&mut connection)?;
         let message_count =
             connection.query_row("SELECT count(*) FROM messages", [], |row| row.get(0))?;
         Ok(Replica {
@@ -202,9 +294,9 @@ impl Replica {
         })
     }
 
-    pub fn apply(&mut self, views: &[MessageView]) -> Result<(), ReplicaError> {
+    pub fn apply(&mut self, batch: &Batch) -> Result<(), ReplicaError> {
         let transaction = self.connection.transaction()?;
-        let new_messages = store_views(&transaction, views)?;
+        let new_messages = store_batch(&transaction, batch)?;
         transaction.commit()?;
         self.message_count = self.message_count.saturating_add(new_messages);
         Ok(())
@@ -212,11 +304,11 @@ impl Replica {
 
     pub fn apply_from_feed(
         &mut self,
-        views: &[MessageView],
+        batch: &Batch,
         feed_cursor: &str,
     ) -> Result<(), ReplicaError> {
         let transaction = self.connection.transaction()?;
-        let new_messages = store_views(&transaction, views)?;
+        let new_messages = store_batch(&transaction, batch)?;
         transaction.execute(
             "INSERT INTO feed (only_row, cursor) VALUES (1, ?1)
              ON CONFLICT (only_row) DO UPDATE SET cursor = excluded.cursor",
@@ -285,6 +377,30 @@ impl Replica {
             .map(Some)
             .map_err(ReplicaError::StoredViewIsNotJson)
     }
+
+    pub fn task(&self, id: &str) -> Result<Option<Task>, ReplicaError> {
+        Ok(tasks::task(&self.connection, id)?)
+    }
+
+    pub fn task_events(&self, task: &str) -> Result<Vec<TaskEvent>, ReplicaError> {
+        Ok(tasks::task_events(&self.connection, task)?)
+    }
+
+    pub fn actor(&self, id: &str) -> Result<Option<Actor>, ReplicaError> {
+        Ok(actors::actor(&self.connection, id)?)
+    }
+
+    pub(crate) fn unseen_actors(&self, named_ids: &[String]) -> Result<Vec<String>, ReplicaError> {
+        Ok(actors::unseen_actors(&self.connection, named_ids)?)
+    }
+}
+
+fn store_batch(transaction: &Transaction<'_>, batch: &Batch) -> Result<u32, ReplicaError> {
+    let new_messages = store_views(transaction, &batch.views)?;
+    tasks::keep_task_events(transaction, &batch.task_events)?;
+    actors::keep_actors(transaction, batch.actors.values())?;
+    actors::keep_unlisted_actors(transaction, &batch.unlisted_actor_ids)?;
+    Ok(new_messages)
 }
 
 fn store_views(transaction: &Transaction<'_>, views: &[MessageView]) -> Result<u32, ReplicaError> {
@@ -311,8 +427,13 @@ fn store_views(transaction: &Transaction<'_>, views: &[MessageView]) -> Result<u
         let stored_as_new = store_new_view.execute(fields)? == 1;
         if stored_as_new {
             new_messages += 1;
-        } else {
-            replace_with_newer_view.execute(fields)?;
+        }
+        let view_is_the_newest = stored_as_new || replace_with_newer_view.execute(fields)? == 1;
+        let Some(task) = &view.task else {
+            continue;
+        };
+        if view_is_the_newest {
+            tasks::keep_root_task(transaction, &view.id, &view.channel, task)?;
         }
     }
     Ok(new_messages)
