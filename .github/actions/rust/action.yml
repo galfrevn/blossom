@@ -6,8 +6,9 @@ inputs:
     description: The pinned toolchain version.
     required: true
   components:
-    description: The toolchain components to install, separated by commas.
-    required: true
+    description: The toolchain components to install, separated by commas. None by default.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -18,7 +19,11 @@ runs:
         PINNED_TOOLCHAIN: ${{ inputs.toolchain }}
         COMPONENTS: ${{ inputs.components }}
       run: |
-        rustup toolchain install "$PINNED_TOOLCHAIN" --profile minimal --component "$COMPONENTS" --no-self-update
+        if [ -n "$COMPONENTS" ]; then
+          rustup toolchain install "$PINNED_TOOLCHAIN" --profile minimal --component "$COMPONENTS" --no-self-update
+        else
+          rustup toolchain install "$PINNED_TOOLCHAIN" --profile minimal --no-self-update
+        fi
         rustup default "$PINNED_TOOLCHAIN"
         for installed_toolchain in $(rustup toolchain list --quiet); do
           case "$installed_toolchain" in
