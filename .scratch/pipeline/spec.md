@@ -25,6 +25,10 @@ All runs are pushes to `main` on 2026-11-20, on GitHub's standard runners (`ubun
 | 44829533423, attempt 1 | `a0016ed` | miss | 94 s | 377 s | 6 min 21 s |
 | 44829533423, attempt 2 | `a0016ed` | Linux hit; macOS miss, new runner image | 37 s | cancelled by the next push | none |
 | 44838946020 | `e864dab` | partial: `Cargo.lock` changed | 39 s | 129 s | 2 min 29 s |
+| 44840700119 | `6a70891` | full match on both | 36 s | 89 s | 1 min 32 s |
+| 44840781257 | `e3c4f7e` | full match on both | 29 s | 105 s | 1 min 47 s |
+
+The last two were measured after the plan was written. They are the warm baseline that tickets 01 and 02 measure against.
 
 Split into waiting, setup and running:
 
@@ -99,7 +103,7 @@ Each ticket is one commit to `main`. Its comments record the before and after fr
 
 | | Before, measured | After, projected |
 | --- | --- | --- |
-| Push to result, typical | 6 min 21 s cold, 2 min 29 s partial | about 1 min 30 s |
+| Push to result, typical | 6 min 21 s cold, 2 min 29 s partial, 1 min 32 s – 1 min 47 s warm | about 1 min 20 s, warm on every image |
 | Push to result, `Cargo.lock` changed | 2 min 29 s | about 2 min 30 s |
 | Push to result, new Rust toolchain | 6 min 21 s | about 4 min 30 s, the two macOS jobs in parallel |
 | Runner minutes per push | 7.6 cold, 2.8 warm | about 2.6 warm |
