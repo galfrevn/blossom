@@ -32,6 +32,8 @@ When quality and speed of delivery conflict, quality wins.
 
 **Done means `bun run check` passes.** It runs everything CI runs, including the check of these naming and comment rules.
 
+**Every push goes through the pre-push hook.** When it refuses a push, fix what it reports and push again; `--no-verify` is never used.
+
 ## Agent skills
 
 ### Issue tracker
