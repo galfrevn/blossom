@@ -1,0 +1,33 @@
+name: rust
+description: Install the pinned Rust toolchain as the only one on the runner, and restore the Rust cache.
+
+inputs:
+  toolchain:
+    description: The pinned toolchain version.
+    required: true
+  components:
+    description: The toolchain components to install.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+    - name: remove every toolchain but the pinned one
+      shell: bash
+      env:
+        PINNED_TOOLCHAIN: ${{ inputs.toolchain }}
+      run: |
+        for installed_toolchain in $(rustup toolchain list --quiet); do
+          case "$installed_toolchain" in
+            "$PINNED_TOOLCHAIN"-*) ;;
+            *) rustup toolchain uninstall "$installed_toolchain" ;;
+          esac
+        done
+        rustup toolchain list
+    - uses: Swatinem/rust-cache@v2
+      with:
+        save-if: ${{ github.ref == 'refs/heads/main' }}

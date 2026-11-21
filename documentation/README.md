@@ -48,6 +48,7 @@ documentation/
 | 0018 | The UI reaches the core through one contract, generated from Rust | accepted | [adr/architecture/contract.md](adr/architecture/contract.md) |
 | 0019 | Tailwind for styles | accepted | [adr/architecture/styles.md](adr/architecture/styles.md) |
 | 0020 | The app's identifier is io.github.galfrevn.blossom | accepted | [adr/architecture/identifier.md](adr/architecture/identifier.md) |
+| 0021 | CI checks everything on every push, on free runners, in under two minutes | accepted | [adr/architecture/pipeline.md](adr/architecture/pipeline.md) |
 
 "Proposed" means the decision was recommended and shown but not confirmed explicitly. Purely technical decisions in the core were delegated to Claude and are recorded as accepted for review; they say so in their first line.
 
