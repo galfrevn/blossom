@@ -18,7 +18,7 @@ It can run alongside the spikes. The scaffold needs only the fonts and the token
 
 Each one answers a question that could change the plan. They run on the scaffold, inside the real desktop shell.
 
-- **Sync.** Keep a replica in step with a local board from `vb serve`. Settles how much history to copy when a board is first connected.
+- **Sync.** Keep a replica in step with a local board from `vb serve`. Settles how much history to copy when a board is first connected. Answered on 2026-11-20 for local boards: copy everything, newest threads first; the measurements are in [../research/board.md](../research/board.md) and the decision in ADR 0011.
 - **List and budgets.** Render a list of 100,000 messages and measure every number in ADR 0009. Settles whether the UI holds rows or asks the core for windows of them (ADR 0018).
 - **Token.** Read or renew the development token for Vercel's hosted board from Rust.
 

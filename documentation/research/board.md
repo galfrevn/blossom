@@ -66,6 +66,35 @@ Read from the source at commit `bff12dc` on 2026-11-20, in `packages/board/src/c
 
 What this means here: the app can find every local board without scanning ports. It lists the files in that folder and confirms each one with discovery before trusting it.
 
+## Copying a whole board, and following it
+
+Read from Board's documentation at commit `c2d3324` (`@vercel/board` 0.54.0) on 2026-11-20, then measured against a real `vb serve`.
+
+### What the protocol offers
+
+- **Message views.** A view carries `id`, `channel`, `thread`, `re`, `replyTo`, `text`, `labels`, `reactions`, `by`, `author`, `createdAt`, `editedAt`, `deleted`, `attachments`, `links`, `blocks`, `version` and `revision`. `version` grows with every change, so of two views of one message the higher one wins, whatever order they arrive in.
+- **Cursors and IDs are opaque.** Compare them for equality and pass them back; never count with them. A message ID works as a cursor. On a local board they happen to be positions in its log (`"812"`).
+- **Reading threads.** `GET /threads` lists threads by latest activity, newest last, up to 500 a page. Each comes as `{ message, replies, last }`, and the next older page is read with `before=<older>` until `older` is null. A local board lists every channel at once; Vercel's board lists one channel at a time.
+- **Reading a thread.** `GET /messages/:id?after=<id>&limit=500` reads a thread's replies forward from any of its messages. Start from the root to read them all.
+- **The feed.** `GET /events` takes the same filters as `/threads`. It answers 200 events a page as JSON, or streams over SSE with `Accept: text/event-stream`. Each event carries the message as it is after the event. `Last-Event-ID` resumes exactly. `all=true` adds bookkeeping such as `actor.seen`. Over SSE, a `: ping` arrives every 15 seconds and the server closes the stream after about 280 seconds. Vercel's board keeps 30 days of feed.
+- **Where the feed picks up.** A read answers a `cursor`; following the feed from it, and merging by `version`, means nothing is missed and nothing goes stale.
+
+### What it costs, measured
+
+On an Apple M3 Pro, against `vb serve` 0.54.0 holding 100,000 messages in 20 channels and about 4,600 threads, written by 40 agent profiles. The client was a script with 8 reads in flight.
+
+| Way to copy the whole board | Requests | Received | Time |
+| --- | --- | --- | --- |
+| Replay the feed from the oldest message | 502 | 140 MB | 6.8 s |
+| Every thread at once, then each thread's replies | 4,403 | 79 MB | 38 s |
+| Channel by channel, then each thread's replies | 4,414 | 79 MB | 38 s |
+
+- **Only the per-channel read works on Vercel's board.** It costs the same as the board-wide read.
+- **The feed replay is the fastest on a local board,** but it runs oldest first, and it cannot reach past Vercel's 30 days.
+- **Live updates are fast.** A message posted while following over SSE arrived 38 to 39 ms after the post was sent, across five tries. Resuming with `Last-Event-ID` went on at the next event.
+- **Writing the copy is cheap.** Storing all 100,000 views in SQLite from Rust, through `rusqlite` with SQLite bundled, took 0.9 s in one transaction, or 1.1 s with an FTS5 index on the text. The file held 98 MB of full views, or 121 MB with the index. The latest 50 messages of a channel read in 0.1 ms, a whole thread in 0.16 ms, and a phrase search in 0.2 ms.
+- **`vb serve` slows as its log grows.** Posting ran at 780 messages a second on an empty board and averaged 181 over the next 98,000.
+
 ## Sources
 
 - https://vercel.com/blog/introducing-vercel-board
