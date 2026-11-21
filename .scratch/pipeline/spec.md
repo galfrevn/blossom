@@ -1,4 +1,4 @@
-# Pipeline: CI that answers in under two minutes, and releases on a tag
+# Pipeline: CI that answers in under two minutes
 
 **Status:** ready-for-agent
 
@@ -6,11 +6,9 @@
 
 Every push to `main` waits more than six minutes for its result, and the wait is not the checks: the Rust cache has never hit. All six jobs of the first three runs started cold, and re-running a commit with its cache saved still missed on macOS, because the cache key changes whenever GitHub rolls out a new runner image. The macOS job is the critical path, and it compiles Tauri from scratch in release mode on three cores every time.
 
-The project has no way to publish a build either. The app is built locally, and nothing turns a version into something a person can download.
-
 ## Solution
 
-Make the cache hit, split the macOS job in two so its lint and its installer build run side by side, and keep every check honest: the full suite on every push, no retries, no skipped tests, no timeouts widened to pass. A pre-push hook becomes the gate before `main`, since there is no pull request in between. Each job gets a time budget that fails it when exceeded. A tag builds the disk image and publishes it on GitHub Releases, with checksums and a provenance attestation.
+Make the cache hit, split the macOS job in two so its lint and its installer build run side by side, and keep every check honest: the full suite on every push, no retries, no skipped tests, no timeouts widened to pass. A pre-push hook becomes the gate before `main`, since there is no pull request in between. Each job gets a time budget that fails it when exceeded. Releases wait until distribution is decided, and ticket 08 keeps their design.
 
 Everything stays free: GitHub's standard runners cost nothing on a public repository, and every tool added is open source.
 
@@ -53,6 +51,7 @@ Taken with the owner on 2026-11-20:
 
 - **Pushes go straight to `main`.** One person works on the repository, so there is no pull request gate and no merge queue. Pull requests from Dependabot or outside contributors run the same full suite.
 - **Everything is free.** GitHub's standard runners only. No paid runners, no organization, no paid accounts.
+- **Releases come later.** On 2026-11-21 the owner deferred continuous delivery until distribution is decided (ADR 0012). Ticket 08 keeps a free design for then: a tag publishes the disk image, signed ad hoc, as a GitHub prerelease with a checksum and a provenance attestation, with no updater, because ADR 0013 forbids update checks. ADR 0012 is not edited.
 
 Recommended in this plan, and recorded in ADR 0021 by ticket 01:
 
@@ -60,8 +59,6 @@ Recommended in this plan, and recorded in ADR 0021 by ticket 01:
 - **Pull requests cancel superseded runs, and every push to `main` gets a run of its own.** On `main` a run per push says which commit broke it, and on free runners the runs go side by side. That needs a concurrency group per commit on `main`, set in `82d7f2c`. A shared group with `cancel-in-progress` off, as `813ea75` had, still cancels a pending run when a newer one arrives, and makes the rest wait in line behind the run in progress.
 - **The pre-push hook is the gate before `main`.** It runs format, lint, the conventions check and types on what the push changes, in under 9 seconds. It is a hook and not a line in `CLAUDE.md`, because agents skip steps.
 - **Time budgets, enforced.** A push gets its result in under 2 minutes at the median and under 3 at the 95th percentile. Each job fails when a warm run exceeds its budget. A cold run is capped by the job's timeout. A cold run happens when a new Rust toolchain invalidates the cache, about once every six weeks, and it is reported as cold.
-- **Releases are free and unsigned until there is an Apple Developer account. This one waits on the owner.** A tag builds the disk image, signed ad hoc, and publishes it as a GitHub prerelease with checksums and a provenance attestation. It would amend the Distribution section of ADR 0012, which says distribution is not settled, so ADR 0012 stays as it is until the owner confirms. There is no updater, because ADR 0013 forbids update checks.
-
 ## The brief's defaults, applied here
 
 The brief this plan answers names default tools and techniques, and asks for a measured reason to keep anything else.
@@ -95,7 +92,7 @@ The brief this plan answers names default tools and techniques, and asks for a m
 | [05](issues/05.md) | The UI's tests run in random order | None |
 | [06](issues/06.md) | The workflows are locked down and dependencies watched | None |
 | [07](issues/07.md) | Every job has a time budget that fails it | 02 |
-| [08](issues/08.md) | A tag publishes the disk image | 06 |
+| [08](issues/08.md) | A tag publishes the disk image: deferred by the owner | 06 |
 
 Each ticket is one commit to `main`. Its comments record the before and after from the CI run of that commit, by run ID.
 
@@ -113,9 +110,10 @@ The projections come from the step timings above and are confirmed or corrected 
 
 ## Out of Scope
 
+- Releases, until distribution is decided (ticket 08).
 - Paid runners, a GitHub organization and a merge queue.
 - Selecting checks by diff.
-- Signing with a Developer ID and notarization. They need the Apple Developer Program, $99 a year. The release workflow leaves a place for them.
+- Signing with a Developer ID and notarization. They need the Apple Developer Program, $99 a year. Ticket 08's design leaves a place for them.
 - An updater inside the app (ADR 0013).
 - Intel and universal builds, Homebrew, and Linux or Windows builds (ADR 0012).
 - Restoring file times from git to skip rebuilding workspace crates. A commit authored before the previous cached build would look up to date, and CI would test stale code.
