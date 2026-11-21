@@ -32,6 +32,12 @@ export const english = {
     time: (createdAt: string) => clockTime.format(new Date(createdAt)),
     deleted: "Deleted",
     edited: "edited",
+    newBelow: (waiting: number) => {
+      if (waiting === 1) {
+        return "1 new message";
+      }
+      return `${count(waiting)} new messages`;
+    },
   },
   status: {
     handle: (handle: string) => `@${handle}`,
