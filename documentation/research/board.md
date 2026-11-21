@@ -53,7 +53,7 @@ Every request sends `Authorization: Bearer <token>`, an OIDC token whose audienc
 
 A board behind `tailscale serve` takes no token: Tailscale tells the board who is calling.
 
-For this project that means local and tailnet boards are easy to reach from Rust. Reading or renewing the development token for Vercel's hosted board from Rust is untested.
+For this project that means local and tailnet boards are easy to reach from Rust. How the development token for Vercel's hosted board is minted, and what Rust needs to read or renew it, is in "Minting a token for Vercel's hosted board" below.
 
 ## How a client finds a local board
 
@@ -95,6 +95,43 @@ On an Apple M3 Pro, against `vb serve` 0.54.0 holding 100,000 messages in 20 cha
 - **Writing the copy is cheap.** Storing all 100,000 views in SQLite from Rust, through `rusqlite` with SQLite bundled, took 0.9 s in one transaction, or 1.1 s with an FTS5 index on the text. The file held 98 MB of full views, or 121 MB with the index. The latest 50 messages of a channel read in 0.1 ms, a whole thread in 0.16 ms, and a phrase search in 0.2 ms.
 - **`vb serve` slows as its log grows.** Posting ran at 780 messages a second on an empty board and averaged 181 over the next 98,000.
 
+## Minting a token for Vercel's hosted board
+
+Read from the sources on 2026-11-20. Board's side is `packages/board/src/client/node.ts` at `vercel/board` commit `c2d3324` (`@vercel/board` 0.54.0, which depends on `@vercel/oidc` ^3.8.9). Vercel's side is `packages/oidc`, `packages/cli-config` and `packages/cli-auth` on `vercel/vercel`'s main branch. The files were then checked on the owner's machine against Vercel CLI 59.1.4, reading only file names, field names and expiry times. No token was printed, and no request was sent.
+
+### How Board's CLI does it
+
+1. **The Vercel login.** `vercel login` keeps it in `auth.json` in the Vercel CLI's data folder: on macOS `~/Library/Application Support/com.vercel.cli/auth.json`, mode 0600. The folder is `$XDG_DATA_HOME/com.vercel.cli` when that variable is set, and a legacy `~/.now` is still read.
+   - The file holds `token` (an opaque string of 60 characters here), `refreshToken`, `expiresAt` in Unix seconds, and `userId`.
+   - Setting `credStorage` to `keyring` moves the same fields into the macOS Keychain, under the service `com.vercel.vercel-cli` and the account `cli:` plus the first 16 hex digits of the SHA-256 of the config folder's path. The default is the file.
+2. **Refreshing the login.** The access token is short-lived and is refreshed only when something uses it. On this machine it had expired 94 hours earlier. `@vercel/oidc` refreshes it at the token endpoint that `https://vercel.com/.well-known/openid-configuration` names, with `grant_type=refresh_token` and the Vercel CLI's own OAuth client ID. It writes the new pair back into `auth.json`, and it empties `auth.json` when the refresh fails.
+3. **Which project.** The board's discovery names a project. Board checks that the board's host really belongs to it before minting anything. It asks `GET https://api.vercel.com/v13/deployments/{host}`, then `GET /now/aliases/{host}`, first in the person's own scope and then in each team from `GET /v2/teams?limit=100`. A board whose host belongs to another project gets no token, so a board cannot collect tokens for projects it is not part of. A board on a loopback host is trusted to name its own project.
+4. **A development token.** `POST https://api.vercel.com/v1/projects/{projectId}/token?source=board`, with `&teamId=` for a team's project, sent as the login, answers `{ "token" }`. When the login lives in the Keychain, Board runs `vercel project token {projectId} --format=json` instead, and `vercel api` for step 3.
+5. **The board's token.** `POST https://oidc.vercel.com/~token` with `{ "token": <development token>, "aud": <board URL> }` answers `{ "token", "expiry" }`, an OIDC token whose audience is the board. Board's code says it lives 12 hours; its `exp` claim says exactly.
+6. **The cache.** The token is kept in `~/.config/board/tokens/`, or `$XDG_CONFIG_HOME/board/tokens/`, with the folder at 0700 and each file at 0600.
+   - A file's name is the first 32 hex digits of the SHA-256 of the board URL. When an app hands Board a login of its own, the name hashes the URL, a newline and that login instead.
+   - A file holds `{ "token", "expiresAt" }`, with `expiresAt` in milliseconds.
+   - A cached token is used until 5 minutes before it expires, and every write deletes files untouched for 24 hours.
+
+### What Rust needs
+
+- **Reading the cache** needs only the file system and SHA-256: the same file name, the same JSON and the same five-minute margin. This machine has no `~/.config/board` yet, because no hosted board has been opened here.
+- **Renewing alone means refreshing the Vercel login,** because its access token is usually expired. That is the part to avoid.
+  - Refreshing as the Vercel CLI's OAuth client rotates the refresh token the CLI also holds. Two programs refreshing at once leave one of them with a dead token, and `@vercel/oidc` answers a failed refresh by logging the person out.
+  - A login kept in the Keychain cannot be read without macOS asking the person.
+- **Renewing through the Vercel CLI avoids both.** `vercel api` does the project check and `vercel project token` gives the development token. The CLI refreshes and stores its own login. Blossom then sends one request itself, the exchange to `oidc.vercel.com`, and writes the result into Board's cache in Board's format, so `vb` and Blossom share it.
+- **Hosts.** Minting reaches `api.vercel.com`, `oidc.vercel.com` and, for a refresh, `vercel.com`. ADR 0013 allows only the board, so either way needs a decision. ADR 0022 proposes one.
+
+### What a first copy would cost
+
+Vercel's board lists threads one channel at a time. The local measurement under "Copying a whole board, and following it" priced that read at 4,414 requests for 100,000 messages in about 4,600 threads: 38 s against a local board with 8 reads in flight.
+
+- **Over the network,** each request costs a round trip. At 150 to 300 ms, with 8 in flight, the same copy would take roughly 80 to 170 s, before any rate limit.
+- **Page size.** Board's documentation says a page holds up to 500 threads or messages. If the hosted board caps a page lower, threads with long reply chains take more requests.
+- **The 30 days of feed** limit only the replay, which the hosted board cannot use for a first copy anyway.
+
+None of this is measured. Measuring it needs the owner's Vercel account and a real hosted board.
+
 ## Sources
 
 - https://vercel.com/blog/introducing-vercel-board
@@ -102,3 +139,6 @@ On an Apple M3 Pro, against `vb serve` 0.54.0 holding 100,000 messages in 20 cha
 - https://github.com/vercel/board/blob/bff12dc30e1729fb42b18a233cc8b1f4a77e90ba/packages/board/src/cli/serve.ts
 - https://github.com/vercel/board/blob/bff12dc30e1729fb42b18a233cc8b1f4a77e90ba/packages/board/src/client/node.ts
 - https://thenewstack.io/vercel-board-agent-swarms/
+- https://github.com/vercel/board/blob/c2d3324/packages/board/src/client/node.ts
+- https://github.com/vercel/vercel/tree/main/packages/oidc/src (`exchange-vercel-oidc-token.ts`, `token-util.ts`, `token-io.ts`, `oauth.ts`)
+- https://github.com/vercel/vercel/tree/main/packages/cli-config/src (`paths.ts`, `cred-storage.ts`, `types.ts`) and `packages/cli-auth/credentials-store.ts`
