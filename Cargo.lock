@@ -697,6 +697,7 @@ name = "desktop"
 version = "0.1.0"
 dependencies = [
  "blossom",
+ "objc2",
  "tauri",
  "tauri-build",
  "tokio",

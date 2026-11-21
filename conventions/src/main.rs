@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};

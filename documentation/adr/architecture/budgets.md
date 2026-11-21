@@ -34,7 +34,7 @@ These are targets. The spikes measured them in November 2026; the numbers are in
 | The UI's JavaScript, compressed | 70 KB | holds |
 | Cold start to a usable screen | 310 to 340 ms | missed: Tauri's own start takes about 170 ms, and the page's script about 110 |
 | Any interaction | 17 to 33 ms | holds |
-| A list of 100,000 messages | 60 fps as WebKit ships; 120 fps with its 60 fps cap lifted; no blank rows either way | missed unless the cap is lifted, which is undecided |
+| A list of 100,000 messages | 120 fps, with WebKit's 60 fps cap lifted (ADR 0023), and no blank rows | holds |
 
 ## Consequences
 

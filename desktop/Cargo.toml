@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 blossom = { version = "0.0.0", path = "../core" }
+objc2 = "0.6.5"
 tauri = { version = "2.12.7", features = ["config-toml"] }
 tokio = { version = "1.54.1", features = ["sync", "time"] }
 

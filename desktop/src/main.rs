@@ -1,3 +1,5 @@
+mod rate;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -159,6 +161,11 @@ fn main() -> ExitCode {
                 .ok()
                 .map(|data_folder| data_folder.join("replicas"));
             application.manage(Arc::new(Session::new(replicas_folder)));
+            if let Some(window) = application.get_webview_window("main")
+                && let Err(error) = rate::draw_at_the_display_rate(&window)
+            {
+                eprintln!("blossom: the window could not draw at the display's rate: {error}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -92,5 +92,5 @@ Measured with `footprint`, which reports the same physical footprint as Activity
 
 - The core keeps the ordered IDs, and reads windows by ID.
 - The list measures rows as they are drawn, keeps a running total of heights, and holds only the windows near the screen.
-- Whether to lift WebKit's 60 fps cap is a decision for the owner.
+- WebKit's 60 fps cap is lifted, as the owner chose on 2026-11-21 (ADR 0023). Measured again with the shell's own code: 8 ms frames when idle, 358 to 359 of 360 frames on time at every speed, a jump in 17 ms and a selection in 8 ms.
 - A cold start under 300 ms needs its own work on the shell's start and the page's script.

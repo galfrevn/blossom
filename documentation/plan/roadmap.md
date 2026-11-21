@@ -41,14 +41,13 @@ Each part is a spec with its tickets under `.scratch/`, written on 2026-11-21. I
    - `attention`: what waits on the person, where the app opens, with notifications and the Dock's count.
 3. **Boards:** the switcher, reading offline, and opening a board by its address (`boards`).
 4. **Vercel's hosted board** (`hosted`). It waits for a hosted board to measure against.
-5. **Release** (`release`): a command that measures every budget, and a cold start under 300 ms. Two decisions of the owner's are left: rendering at 120 Hz, and signing.
+5. **Release** (`release`): a command that measures every budget, and a cold start under 300 ms. The page draws at 120 Hz since 2026-11-21 (ADR 0023); signing waits on the owner.
 
 What the first release contains is in ADR 0012.
 
 ## Waiting on something else
 
 - **Distribution on macOS** waits for a decision on an Apple Developer account.
-- **Rendering at 120 Hz** waits for a decision on WebKit's private switch (`.scratch/release`, `documentation/research/list.md`).
 - **A hosted board to measure** waits for the owner to have one (`.scratch/hosted`).
 - **Graph**, then Replay and schema tables, come after the first release.
 - **Glass** comes back, if it does, once the first release works (ADR 0006).

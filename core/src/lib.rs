@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod access;
 pub mod contract;
 mod copy;
