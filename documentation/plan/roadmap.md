@@ -14,19 +14,21 @@ Close the visual design before the lenses are built on it. The fourth concept is
 
 It can run alongside the spikes. The scaffold needs only the fonts and the tokens.
 
+Closed on 2026-11-21: the owner approved the fourth concept as it stands (ADR 0006).
+
 ## 3. Three technical spikes
 
 Each one answers a question that could change the plan. They run on the scaffold, inside the real desktop shell.
 
-- **Sync.** Keep a replica in step with a local board from `vb serve`. Settles how much history to copy when a board is first connected. Answered on 2026-11-20 for local boards: copy everything, newest threads first; the measurements are in [../research/board.md](../research/board.md) and the decision in ADR 0011.
+- **Sync.** Keep a replica in step with a local board from `vb serve`. Settles how much history to copy when a board is first connected. Answered on 2026-11-20 for local boards: copy everything, newest threads first; the measurements are in [../research/board.md](../research/board.md) and the decision in ADR 0011. Built by 2026-11-21: the replica copies a local board, follows it live, notices when it dies and resumes after a restart (`.scratch/sync`).
 - **List and budgets.** Render a list of 100,000 messages and measure every number in ADR 0009. Settles whether the UI holds rows or asks the core for windows of them (ADR 0018).
-- **Token.** Read or renew the development token for Vercel's hosted board from Rust.
+- **Token.** Read or renew the development token for Vercel's hosted board from Rust. Answered on 2026-11-20: ADR 0022.
 
 ## 4. The app
 
 1. Reading, against a local board: Flow, threads, Tasks, Fleet, the command palette and search. It includes the empty state of a board no agent has written on yet, which shows how to point one at it ([../research/landscape.md](../research/landscape.md)).
 2. Writing and Attention: the actions in ADR 0010, always optimistic, and the Attention lens.
-3. Vercel's hosted board.
+3. Vercel's hosted board. The owner has no hosted board and has not used Vercel Board, so how to copy one waits until there is one to measure against. Creating one is a decision of its own.
 
 What the first release contains is in ADR 0012.
 

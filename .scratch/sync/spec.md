@@ -116,7 +116,7 @@ Each case, and where it is handled. The tests named are in `core/tests/sync.rs`,
 - Showing the newest threads first (ADR 0011), which arrives with Flow.
 - The full-text index, which arrives with search. The spike measured it at 0.2 ms a query.
 - Reading a stopped board's replica offline. With no lens yet there is nothing to read, and it needs a decision on what the app opens on when the board is gone.
-- Vercel's hosted board. The token spike (ADR 0022, proposed) settled how to get its token, not how to copy it. Every read there costs about five requests against Vercel's per-login rate limit, so a whole first copy of 100,000 messages would spend about 20,000 of the person's requests, an estimate not yet measured. The board also leaves out channel counts, so there is no total to show. Its first copy is decided once it is measured against a real hosted board.
+- Vercel's hosted board. The token spike (ADR 0022) settled how to get its token, not how to copy it. Every read there costs about five requests against Vercel's per-login rate limit, so a whole first copy of 100,000 messages would spend about 20,000 of the person's requests, an estimate not yet measured. The board also leaves out channel counts, so there is no total to show. Its first copy is decided once it is measured against a real hosted board, and the owner has none yet.
 - Writing, attachments and their downloads.
 - Trimming what each stored view keeps. The spike stored full views: 98 MB for 100,000 messages.
 
