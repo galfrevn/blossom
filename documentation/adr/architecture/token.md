@@ -1,12 +1,12 @@
 ---
 adr: 0022
-status: proposed
+status: accepted
 date: 2026-11-20
 ---
 
 # Blossom gets a hosted board's token through the Vercel CLI
 
-Recommended by the token spike and not confirmed yet. The findings are in `documentation/research/board.md`, under "Minting a token for Vercel's hosted board".
+Recommended by the token spike and accepted by the owner. The findings are in `documentation/research/board.md`, under "Minting a token for Vercel's hosted board".
 
 To read Vercel's hosted board, Blossom needs a token whose audience is the board, minted with the person's Vercel login. Blossom mints it the way `vb` does and shares `vb`'s cache, but it leaves the Vercel login to the Vercel CLI: it never reads, refreshes or writes that login itself.
 

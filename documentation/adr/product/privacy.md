@@ -15,3 +15,4 @@ The app sends no usage data and makes no connection other than to the board a pe
 - Anything that would phone home, such as an update check, needs its own decision and has to be visible to the person.
 - The core's HTTP client follows no redirects and uses no proxy, not even one set in the environment, so a request meant for a board reaches that board and nothing else. A local process that answers like a board and redirects elsewhere is simply not opened.
 - The page itself can reach only its own assets and the core: the desktop shell's content security policy enforces this.
+- ADR 0022 amends this for Vercel's hosted boards. To get a hosted board's token, the app sends one request of its own, the exchange at `oidc.vercel.com`, about every 12 hours, and the `vercel` process it starts talks to Vercel as the person. Local boards are unchanged.
