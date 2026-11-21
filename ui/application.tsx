@@ -4,11 +4,10 @@ import type {
   FlowWindow,
   OpenBoard,
   ReplicaState,
+  Thread,
 } from "./core/contract";
 import { type Store, useStore } from "./core/store";
-import { dictionary } from "./dictionary";
-import { FlowList } from "./flow/list";
-import { LensHeader } from "./frame/lens";
+import { FlowLens } from "./flow/lens";
 import { Sidebar } from "./frame/sidebar";
 import { StatusBar } from "./frame/status";
 import { TitleBar } from "./frame/title";
@@ -20,6 +19,7 @@ export function Application({
   channelsStore,
   flowStore,
   readFlow,
+  readThread,
 }: {
   openBoardStore: Store<OpenBoard>;
   replicaStore: Store<ReplicaState>;
@@ -30,6 +30,7 @@ export function Application({
     start: number,
     count: number,
   ) => Promise<FlowWindow>;
+  readThread: (messageId: string) => Promise<Thread | null>;
 }) {
   const openBoard = useStore(openBoardStore);
   const replicaState = useStore(replicaStore);
@@ -61,21 +62,14 @@ export function Application({
             onChooseChannel={chooseChannel}
             onChooseFlow={showTheWholeBoard}
           />
-          <main className="flex min-w-0 flex-1 flex-col">
-            <LensHeader
-              title={dictionary.lenses.flow.title}
-              description={dictionary.lenses.flow.description}
-              channel={chosenChannel}
-              onWiden={showTheWholeBoard}
-            />
-            <FlowList
-              key={chosenChannel ?? ""}
-              change={flowChange}
-              channel={chosenChannel}
-              boardUrl={openBoard.url}
-              readFlow={readFlow}
-            />
-          </main>
+          <FlowLens
+            change={flowChange}
+            channel={chosenChannel}
+            boardUrl={openBoard.url}
+            onWiden={showTheWholeBoard}
+            readFlow={readFlow}
+            readThread={readThread}
+          />
         </div>
       )}
       {openBoard?.kind === "open" && (

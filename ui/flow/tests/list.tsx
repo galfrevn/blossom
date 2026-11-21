@@ -6,7 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import type { FlowChange, FlowRow } from "../../core/contract";
 import { createFakeCore } from "../../core/fake";
 import { dictionary } from "../../dictionary";
@@ -24,26 +24,23 @@ function renderFlowOf(rows: FlowRow[], channel: string | null = null) {
     latestChange = change;
   });
   fakeCore.pushFlow(rows);
-  const { rerender } = render(
+  const selectNothing = vi.fn();
+  const list = () => (
     <FlowList
       change={latestChange}
       channel={channel}
       boardUrl={BOARD_URL}
       readFlow={fakeCore.core.readFlow}
-    />,
+      selectedMessage={undefined}
+      onSelect={selectNothing}
+    />
   );
+  const { rerender } = render(list());
   return {
     pushFlow: (newRows: FlowRow[]) => {
       fakeCore.pushFlow(newRows);
       act(() => {
-        rerender(
-          <FlowList
-            change={latestChange}
-            channel={channel}
-            boardUrl={BOARD_URL}
-            readFlow={fakeCore.core.readFlow}
-          />,
-        );
+        rerender(list());
       });
     },
   };

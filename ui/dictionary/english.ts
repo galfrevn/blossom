@@ -70,6 +70,16 @@ export const english = {
       return `${count(waiting)} new messages`;
     },
   },
+  thread: {
+    title: "Thread",
+    inChannel: (channel: string) => `Thread in #${channel}`,
+    close: "Close",
+    closeKey: "esc",
+    onBehalfOf: (person: string) => `via ${person}`,
+    time: (createdAt: string) => clockTime.format(new Date(createdAt)),
+    deleted: "Deleted",
+    edited: "edited",
+  },
   status: {
     handle: (handle: string) => `@${handle}`,
     copying: (stored: number, total: number | null) => {

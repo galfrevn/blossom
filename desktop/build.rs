@@ -9,6 +9,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "subscribe_to_channels",
         "subscribe_to_flow",
         "read_flow",
+        "read_thread",
     ]);
     tauri_build::try_build(Attributes::new().app_manifest(app_manifest))?;
     Ok(())

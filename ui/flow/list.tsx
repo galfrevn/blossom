@@ -4,6 +4,7 @@ import { dictionary } from "../dictionary";
 import { EmptyBoard } from "./empty";
 import { FlowLine } from "./line";
 import { useLayoutAfterDrawing, useScrollFollowing } from "./scroll";
+import { useSelectionByArrows, useSelectionByClicks } from "./selection";
 import {
   followTheChange,
   followTheTotal,
@@ -26,9 +27,11 @@ const Placeholder = memo(function PlaceholderRow({ index }: { index: number }) {
 const Line = memo(function LoadedLine({
   index,
   row,
+  selection,
 }: {
   index: number;
   row: FlowRow;
+  selection: string | undefined;
 }) {
   return (
     <div
@@ -36,19 +39,46 @@ const Line = memo(function LoadedLine({
       data-loaded={true}
       className="absolute inset-x-0 top-0"
     >
-      <FlowLine row={row} />
+      <FlowLine row={row} selection={selection} />
     </div>
   );
 });
 
-function linesBetween(state: ListState, first: number, last: number) {
+function selectionWithin(
+  row: FlowRow,
+  selectedMessage: string | undefined,
+): string | undefined {
+  if (selectedMessage === undefined) {
+    return undefined;
+  }
+  const isTheRow = row.id === selectedMessage;
+  const isInItsFold =
+    row.fold?.recent.some((line) => line.id === selectedMessage) === true;
+  if (isTheRow || isInItsFold) {
+    return selectedMessage;
+  }
+  return undefined;
+}
+
+function linesBetween(
+  state: ListState,
+  range: { first: number; last: number },
+  selectedMessage: string | undefined,
+) {
   const lines: React.ReactNode[] = [];
-  for (let index = first; index <= last; index += 1) {
+  for (let index = range.first; index <= range.last; index += 1) {
     const row = state.windows.rowAt(index);
     if (row === undefined) {
       lines.push(<Placeholder key={index} index={index} />);
     } else {
-      lines.push(<Line key={index} index={index} row={row} />);
+      lines.push(
+        <Line
+          key={index}
+          index={index}
+          row={row}
+          selection={selectionWithin(row, selectedMessage)}
+        />,
+      );
     }
   }
   return lines;
@@ -93,6 +123,8 @@ export function FlowList({
   channel,
   boardUrl,
   readFlow,
+  selectedMessage,
+  onSelect,
 }: {
   change: FlowChange | undefined;
   channel: string | null;
@@ -102,6 +134,8 @@ export function FlowList({
     start: number,
     count: number,
   ) => Promise<FlowWindow>;
+  selectedMessage: string | undefined;
+  onSelect: (messageId: string) => void;
 }) {
   const [, redraw] = useReducer((count: number) => count + 1, 0);
   const scroller = useRef<HTMLDivElement>(null);
@@ -119,6 +153,8 @@ export function FlowList({
   }
   useScrollFollowing(scroller, state, redraw);
   useLayoutAfterDrawing({ scroller, content }, state, redraw);
+  useSelectionByClicks(content, onSelect);
+  useSelectionByArrows(scroller, state, selectedMessage, onSelect);
   const goToTheNewest = useCallback(() => {
     const element = scroller.current;
     state.keepsToTheBottom = true;
@@ -132,7 +168,7 @@ export function FlowList({
       <div ref={scroller} className="min-h-0 flex-1 overflow-auto">
         <EmptyWhenNothingIsWritten state={state} boardUrl={boardUrl} />
         <div ref={content} role="feed" aria-busy={false} className="relative">
-          {linesBetween(state, range.first, range.last)}
+          {linesBetween(state, range, selectedMessage)}
         </div>
       </div>
       <NewBelow count={newBelowOf(state)} onChoose={goToTheNewest} />

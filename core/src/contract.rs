@@ -12,6 +12,8 @@ pub fn typescript() -> String {
         FlowFold::decl(&configuration),
         FlowWindow::decl(&configuration),
         FlowChange::decl(&configuration),
+        ThreadMessage::decl(&configuration),
+        Thread::decl(&configuration),
     ];
     declarations
         .iter()
@@ -92,4 +94,23 @@ pub struct FlowWindow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 pub struct FlowChange {
     pub revision: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadMessage {
+    pub id: String,
+    pub author: String,
+    pub on_behalf_of: Option<String>,
+    pub created_at: String,
+    pub text: String,
+    pub edited: bool,
+    pub deleted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+pub struct Thread {
+    pub id: String,
+    pub channel: String,
+    pub messages: Vec<ThreadMessage>,
 }

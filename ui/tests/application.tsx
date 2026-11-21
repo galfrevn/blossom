@@ -1,7 +1,12 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { Application } from "../application";
-import type { OpenBoard, ReplicaState } from "../core/contract";
+import type {
+  FlowRow,
+  OpenBoard,
+  ReplicaState,
+  Thread,
+} from "../core/contract";
 import { createFakeCore } from "../core/fake";
 import { createStore } from "../core/store";
 import { dictionary } from "../dictionary";
@@ -18,6 +23,8 @@ function renderApplicationWhileTheCoreSays(said: {
   openBoard?: OpenBoard;
   replicaState?: ReplicaState;
   channels?: string[];
+  flow?: FlowRow[];
+  threads?: Thread[];
 }) {
   const fakeCore = createFakeCore();
   const openBoardStore = createStore(fakeCore.core.subscribeToOpenBoard);
@@ -33,6 +40,12 @@ function renderApplicationWhileTheCoreSays(said: {
   if (said.channels !== undefined) {
     fakeCore.pushChannels(said.channels);
   }
+  if (said.flow !== undefined) {
+    fakeCore.pushFlow(said.flow);
+  }
+  if (said.threads !== undefined) {
+    fakeCore.pushThreads(said.threads);
+  }
   render(
     <Application
       openBoardStore={openBoardStore}
@@ -40,6 +53,7 @@ function renderApplicationWhileTheCoreSays(said: {
       channelsStore={channelsStore}
       flowStore={flowStore}
       readFlow={fakeCore.core.readFlow}
+      readThread={fakeCore.core.readThread}
     />,
   );
   return fakeCore;
@@ -192,4 +206,62 @@ test("with no board running, there is no sidebar", () => {
   renderApplicationWhileTheCoreSays({ openBoard: { kind: "noneRunning" } });
 
   expect(screen.queryByRole("complementary")).toBeNull();
+});
+
+test("selecting a line in Flow opens its thread in the pane, beside the lens", async () => {
+  renderApplicationWhileTheCoreSays({
+    openBoard: boardOfAda,
+    channels: ["fleet/www"],
+    flow: [
+      {
+        id: "reply",
+        channel: "fleet/www",
+        author: "claude",
+        onBehalfOf: "ada",
+        createdAt: "2026-11-21T10:01:00.000Z",
+        text: "deploy failed",
+        edited: false,
+        deleted: false,
+        firstOfItsMinute: true,
+        fold: null,
+      },
+    ],
+    threads: [
+      {
+        id: "thread-root",
+        channel: "fleet/www",
+        messages: [
+          {
+            id: "root",
+            author: "Ada Lovelace",
+            onBehalfOf: null,
+            createdAt: "2026-11-21T10:00:00.000Z",
+            text: "deploy www",
+            edited: false,
+            deleted: false,
+          },
+          {
+            id: "reply",
+            author: "claude",
+            onBehalfOf: "ada",
+            createdAt: "2026-11-21T10:01:00.000Z",
+            text: "deploy failed",
+            edited: false,
+            deleted: false,
+          },
+        ],
+      },
+    ],
+  });
+  const line = await within(screen.getByRole("main")).findByRole("article");
+
+  act(() => {
+    line.click();
+  });
+
+  const pane = await screen.findByRole("complementary", {
+    name: dictionary.thread.inChannel("fleet/www"),
+  });
+  expect(await within(pane).findByText("deploy www")).toBeDefined();
+  expect(within(pane).getByText("deploy failed")).toBeDefined();
 });

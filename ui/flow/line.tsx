@@ -38,12 +38,13 @@ function Edited({ row }: { row: FlowRow }) {
   );
 }
 
-function MessageLine({ row }: { row: FlowRow }) {
+function MessageLine({ row, selected }: { row: FlowRow; selected: boolean }) {
   const time = dictionary.flow.time(row.createdAt);
   return (
     <article
       data-message={row.id}
-      className="grid grid-cols-[44px_minmax(0,1fr)] gap-x-3 px-5 py-[5px] hover:bg-raised"
+      aria-current={selected}
+      className="grid grid-cols-[44px_minmax(0,1fr)] gap-x-3 px-5 py-[5px] hover:bg-raised aria-[current=true]:bg-accent-wash"
     >
       <time
         dateTime={row.createdAt}
@@ -66,18 +67,30 @@ function MessageLine({ row }: { row: FlowRow }) {
   );
 }
 
-function LineOf({ row }: { row: FlowRow }) {
+function LineOf({
+  row,
+  selection,
+}: {
+  row: FlowRow;
+  selection: string | undefined;
+}) {
   if (row.fold !== null) {
-    return <FoldLine row={row} fold={row.fold} />;
+    return <FoldLine row={row} fold={row.fold} selection={selection} />;
   }
-  return <MessageLine row={row} />;
+  return <MessageLine row={row} selected={selection === row.id} />;
 }
 
-export function FlowLine({ row }: { row: FlowRow }) {
+export function FlowLine({
+  row,
+  selection,
+}: {
+  row: FlowRow;
+  selection: string | undefined;
+}) {
   return (
     <>
       <MinuteDivider row={row} />
-      <LineOf row={row} />
+      <LineOf row={row} selection={selection} />
     </>
   );
 }

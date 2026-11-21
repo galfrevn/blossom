@@ -13,3 +13,7 @@ export type FlowFold = { count: number, agents: number, recent: Array<FlowRow>, 
 export type FlowWindow = { total: number, start: number, rows: Array<FlowRow>, };
 
 export type FlowChange = { revision: number, };
+
+export type ThreadMessage = { id: string, author: string, onBehalfOf: string | null, createdAt: string, text: string, edited: boolean, deleted: boolean, };
+
+export type Thread = { id: string, channel: string, messages: Array<ThreadMessage>, };

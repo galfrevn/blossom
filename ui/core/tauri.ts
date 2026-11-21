@@ -5,6 +5,7 @@ import type {
   FlowWindow,
   OpenBoard,
   ReplicaState,
+  Thread,
 } from "./contract";
 
 function subscribeOverChannel<Value>(
@@ -38,5 +39,7 @@ export function createTauriCore(): Core {
       subscribeOverChannel<FlowChange>("subscribe_to_flow", listener),
     readFlow: (channel, start, count) =>
       invoke<FlowWindow>("read_flow", { channel, start, count }),
+    readThread: (messageId) =>
+      invoke<Thread | null>("read_thread", { messageId }),
   };
 }

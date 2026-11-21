@@ -50,6 +50,19 @@ function place(scroller: HTMLElement, state: ListState) {
   }
 }
 
+export function recordTheScrollPosition(
+  scroller: HTMLElement,
+  state: ListState,
+) {
+  state.scrollTop = scroller.scrollTop;
+  state.viewportHeight = scroller.clientHeight;
+  const atTheBottom = isAtTheBottom(scroller);
+  if (state.keepsToTheBottom && !atTheBottom) {
+    state.totalWhenItLeftTheBottom = state.heights.count;
+  }
+  state.keepsToTheBottom = atTheBottom;
+}
+
 export function useScrollFollowing(
   scrollerRef: React.RefObject<HTMLDivElement | null>,
   state: ListState,
@@ -67,13 +80,7 @@ export function useScrollFollowing(
       }
       frame = requestAnimationFrame(() => {
         frame = 0;
-        state.scrollTop = scroller.scrollTop;
-        state.viewportHeight = scroller.clientHeight;
-        const atTheBottom = isAtTheBottom(scroller);
-        if (state.keepsToTheBottom && !atTheBottom) {
-          state.totalWhenItLeftTheBottom = state.heights.count;
-        }
-        state.keepsToTheBottom = atTheBottom;
+        recordTheScrollPosition(scroller, state);
         redraw();
       });
     };

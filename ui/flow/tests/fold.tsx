@@ -39,7 +39,7 @@ const recentLines = [
 ];
 
 test("a fold reads as one line: its channel, how many updates from how many agents, and the latest", () => {
-  render(<FlowLine row={foldOf(recentLines)} />);
+  render(<FlowLine row={foldOf(recentLines)} selection={undefined} />);
 
   const line = screen.getByRole("button", { expanded: false });
   expect(within(line).getByText("#fleet/www")).toBeDefined();
@@ -57,7 +57,7 @@ test("a fold reads as one line: its channel, how many updates from how many agen
 });
 
 test("opening a fold shows its last messages in place, and closing it hides them", () => {
-  render(<FlowLine row={foldOf(recentLines)} />);
+  render(<FlowLine row={foldOf(recentLines)} selection={undefined} />);
 
   act(() => screen.getByRole("button", { expanded: false }).click());
   expect(screen.getByText("installing dependencies")).toBeDefined();
@@ -74,7 +74,12 @@ test("one update from one agent says so in the singular", () => {
 });
 
 test("a fold that starts a minute has that minute's divider above it", () => {
-  render(<FlowLine row={{ ...foldOf(recentLines), firstOfItsMinute: true }} />);
+  render(
+    <FlowLine
+      row={{ ...foldOf(recentLines), firstOfItsMinute: true }}
+      selection={undefined}
+    />,
+  );
 
   expect(screen.getByRole("heading", { level: 3 }).textContent).toBe(
     dictionary.flow.time("2026-11-21T11:00:00.000Z"),
@@ -86,11 +91,46 @@ test("a deleted update reads as deleted, in the fold's line and when it is open"
     ...progressRow("14", "secret token pasted by mistake"),
     deleted: true,
   };
-  render(<FlowLine row={foldOf([...recentLines, deletedLatest])} />);
+  render(
+    <FlowLine
+      row={foldOf([...recentLines, deletedLatest])}
+      selection={undefined}
+    />,
+  );
 
   expect(
     screen.getByText(dictionary.flow.latest(dictionary.flow.deleted)),
   ).toBeDefined();
   act(() => screen.getByRole("button", { expanded: false }).click());
   expect(screen.queryByText("secret token pasted by mistake")).toBeNull();
+});
+
+test("a closed fold reads as chosen while its latest update's thread is open", () => {
+  render(<FlowLine row={foldOf(recentLines)} selection="13" />);
+
+  expect(
+    screen
+      .getByRole("button", { expanded: false })
+      .getAttribute("aria-current"),
+  ).toBe("true");
+});
+
+test("an open fold shows each update as a line of its own, which can be chosen", () => {
+  render(<FlowLine row={foldOf(recentLines)} selection="12" />);
+  act(() => screen.getByRole("button", { expanded: false }).click());
+
+  const updates = screen.getAllByRole("article");
+  expect(updates.map((update) => update.dataset.message)).toEqual([
+    "11",
+    "12",
+    "13",
+  ]);
+  expect(updates.map((update) => update.getAttribute("aria-current"))).toEqual([
+    "false",
+    "true",
+    "false",
+  ]);
+  expect(
+    screen.getByRole("button", { expanded: true }).getAttribute("aria-current"),
+  ).toBe("false");
 });

@@ -1,5 +1,6 @@
 mod lines;
 mod numbers;
+mod thread;
 
 use std::cell::RefCell;
 use std::collections::HashSet;

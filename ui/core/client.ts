@@ -3,6 +3,7 @@ import type {
   FlowWindow,
   OpenBoard,
   ReplicaState,
+  Thread,
 } from "./contract";
 
 export type Core = {
@@ -19,4 +20,5 @@ export type Core = {
     start: number,
     count: number,
   ) => Promise<FlowWindow>;
+  readThread: (messageId: string) => Promise<Thread | null>;
 };

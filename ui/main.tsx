@@ -36,6 +36,7 @@ createRoot(rootElement).render(
       channelsStore={channelsStore}
       flowStore={flowStore}
       readFlow={core.readFlow}
+      readThread={core.readThread}
     />
   </StrictMode>,
 );

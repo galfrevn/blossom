@@ -212,7 +212,7 @@ impl From<rusqlite::Error> for ReplicaError {
 
 const WAIT_FOR_ANOTHER_CONNECTION: Duration = Duration::from_secs(2);
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 const SCHEMA: &str = "
     CREATE TABLE messages (
@@ -232,6 +232,7 @@ const SCHEMA: &str = "
     );
     CREATE INDEX messages_by_time
         ON messages (created_at, id, channel, author, plain_agent_reply, re);
+    CREATE INDEX messages_by_thread ON messages (thread, created_at);
     CREATE TABLE arrivals (
         sequence INTEGER PRIMARY KEY,
         id TEXT NOT NULL
