@@ -1,0 +1,77 @@
+#!/bin/sh
+set -eu
+
+milliseconds_now() {
+  bun --print 'Date.now()'
+}
+
+is_empty_object_id() {
+  case "$1" in
+    *[!0]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+started_at=$(milliseconds_now)
+checks_run="none"
+scratch_directory=$(mktemp -d)
+changed_files="$scratch_directory/changed"
+existing_changed_files="$scratch_directory/existing"
+: > "$changed_files"
+
+report_time() {
+  exit_code=$?
+  rm -rf "$scratch_directory"
+  elapsed_milliseconds=$(($(milliseconds_now) - started_at))
+  outcome="passed"
+  if [ "$exit_code" -ne 0 ]; then
+    outcome="refused the push"
+  fi
+  LC_ALL=C awk -v checks="$checks_run" -v outcome="$outcome" -v milliseconds="$elapsed_milliseconds" \
+    'BEGIN { printf "pre-push: %s in %.1f s, checks run: %s\n", outcome, milliseconds / 1000, checks }' >&2
+}
+trap report_time EXIT
+
+while read -r local_ref local_object_id remote_ref remote_object_id; do
+  if is_empty_object_id "$local_object_id"; then
+    continue
+  fi
+  if is_empty_object_id "$remote_object_id" || ! git cat-file -e "$remote_object_id^{commit}" 2>/dev/null; then
+    git log --format= --name-only "$local_object_id" --not --remotes >> "$changed_files"
+  else
+    git diff --name-only "$remote_object_id" "$local_object_id" >> "$changed_files"
+  fi
+  sort -u -o "$changed_files" "$changed_files"
+  if [ ! -s "$changed_files" ]; then
+    continue
+  fi
+  files_unlike_the_push=$(tr '\n' '\0' < "$changed_files" | xargs -0 git diff --name-only "$local_object_id" --)
+  if [ -n "$files_unlike_the_push" ]; then
+    echo "pre-push: these files in the working tree differ from $local_ref, and the checks read the working tree:" >&2
+    echo "$files_unlike_the_push" >&2
+    echo "pre-push: commit, or push from a tree that matches $local_ref" >&2
+    exit 1
+  fi
+done
+
+checks_run="conventions"
+bun run --silent conventions
+
+if grep -q -E '\.rs$|(^|/)Cargo\.(toml|lock)$|(^|/)(clippy|rustfmt)\.toml$' "$changed_files"; then
+  checks_run="$checks_run, rust"
+  bun run --silent rust:format
+  bun run --silent rust:lint
+fi
+
+if grep -q -E '^ui/|^(package\.json|bun\.lock|biome\.json)$' "$changed_files"; then
+  checks_run="$checks_run, ui"
+  while read -r changed_file; do
+    if [ -e "$changed_file" ]; then
+      echo "$changed_file"
+    fi
+  done < "$changed_files" > "$existing_changed_files"
+  if [ -s "$existing_changed_files" ]; then
+    tr '\n' '\0' < "$existing_changed_files" | xargs -0 bun run --silent ui:lint
+  fi
+  bun run --silent ui:types
+fi

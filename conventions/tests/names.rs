@@ -46,6 +46,7 @@ fn names_a_tool_dictates_pass() {
         ("desktop/Tauri.toml", ""),
         ("package.json", ""),
         ("bun.lock", ""),
+        ("hooks/pre-push", ""),
     ])
     .unwrap();
 

@@ -1,7 +1,7 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-const NAMES_A_TOOL_DICTATES: [&str; 7] = [
+const NAMES_A_TOOL_DICTATES: [&str; 8] = [
     "Cargo.toml",
     "Cargo.lock",
     "README.md",
@@ -9,6 +9,7 @@ const NAMES_A_TOOL_DICTATES: [&str; 7] = [
     "CLAUDE.md",
     "GLOSSARY.md",
     "Tauri.toml",
+    "pre-push",
 ];
 
 pub fn paths_not_named_with_one_word(path: &Path) -> Vec<PathBuf> {
