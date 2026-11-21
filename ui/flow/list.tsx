@@ -1,6 +1,7 @@
 import { memo, useCallback, useReducer, useRef } from "react";
 import type { FlowChange, FlowRow, FlowWindow } from "../core/contract";
 import { dictionary } from "../dictionary";
+import { EmptyBoard } from "./empty";
 import { FlowLine } from "./line";
 import { useLayoutAfterDrawing, useScrollFollowing } from "./scroll";
 import {
@@ -74,13 +75,28 @@ function NewBelow({
   );
 }
 
+function EmptyWhenNothingIsWritten({
+  state,
+  boardUrl,
+}: {
+  state: ListState;
+  boardUrl: string;
+}) {
+  if (state.windows.total() !== 0) {
+    return null;
+  }
+  return <EmptyBoard boardUrl={boardUrl} />;
+}
+
 export function FlowList({
   change,
   channel,
+  boardUrl,
   readFlow,
 }: {
   change: FlowChange | undefined;
   channel: string | null;
+  boardUrl: string;
   readFlow: (
     channel: string | null,
     start: number,
@@ -114,6 +130,7 @@ export function FlowList({
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div ref={scroller} className="min-h-0 flex-1 overflow-auto">
+        <EmptyWhenNothingIsWritten state={state} boardUrl={boardUrl} />
         <div ref={content} role="feed" aria-busy={false} className="relative">
           {linesBetween(state, range.first, range.last)}
         </div>

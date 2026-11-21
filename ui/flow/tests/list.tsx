@@ -15,6 +15,7 @@ import { FlowList } from "../list";
 afterEach(cleanup);
 
 const SOMEONE_ACTING_FOR_A_PERSON = /^via /u;
+const BOARD_URL = "http://127.0.0.1:4200/api/board";
 
 function renderFlowOf(rows: FlowRow[], channel: string | null = null) {
   const fakeCore = createFakeCore();
@@ -27,6 +28,7 @@ function renderFlowOf(rows: FlowRow[], channel: string | null = null) {
     <FlowList
       change={latestChange}
       channel={channel}
+      boardUrl={BOARD_URL}
       readFlow={fakeCore.core.readFlow}
     />,
   );
@@ -38,6 +40,7 @@ function renderFlowOf(rows: FlowRow[], channel: string | null = null) {
           <FlowList
             change={latestChange}
             channel={channel}
+            boardUrl={BOARD_URL}
             readFlow={fakeCore.core.readFlow}
           />,
         );
@@ -256,4 +259,12 @@ test("a channel narrows Flow to it and to every channel under it", async () => {
       .map((message) => message.getAttribute("data-message"));
     expect(shown).toEqual(["1", "3"]);
   });
+});
+
+test("a board nobody has written on shows how to point an agent at it", async () => {
+  renderFlowOf([]);
+
+  expect(
+    await screen.findByRole("heading", { name: dictionary.emptyBoard.title }),
+  ).toBeDefined();
 });

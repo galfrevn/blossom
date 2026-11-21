@@ -15,6 +15,16 @@ export const english = {
     instruction: "Start one in a project's checkout with",
     afterwards: "Blossom opens it as soon as it starts.",
   },
+  emptyBoard: {
+    title: "No agent has written on this board yet",
+    explanation:
+      "Blossom shows a board; it does not run agents. Point one at this board and its claims, progress and questions appear here as they happen.",
+    prompt: (url: string) =>
+      `Use the Vercel Board at ${url} with the vb CLI.\nWork the tasks in #general: claim one, post your progress in its thread,\nand when you need a decision from me, block the task and ask in the thread.`,
+    where: "Paste this into Claude Code, Codex or any agent",
+    copy: "Copy",
+    copied: "Copied",
+  },
   sidebar: {
     lenses: "Lenses",
     channels: "Channels",

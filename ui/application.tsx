@@ -72,6 +72,7 @@ export function Application({
               key={chosenChannel ?? ""}
               change={flowChange}
               channel={chosenChannel}
+              boardUrl={openBoard.url}
               readFlow={readFlow}
             />
           </main>
