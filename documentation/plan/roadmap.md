@@ -21,7 +21,7 @@ Closed on 2026-11-21: the owner approved the fourth concept as it stands (ADR 00
 Each one answers a question that could change the plan. They run on the scaffold, inside the real desktop shell.
 
 - **Sync.** Keep a replica in step with a local board from `vb serve`. Settles how much history to copy when a board is first connected. Answered on 2026-11-20 for local boards: copy everything, newest threads first; the measurements are in [../research/board.md](../research/board.md) and the decision in ADR 0011. Built by 2026-11-21: the replica copies a local board, follows it live, notices when it dies and resumes after a restart (`.scratch/sync`).
-- **List and budgets.** Render a list of 100,000 messages and measure every number in ADR 0009. Settles whether the UI holds rows or asks the core for windows of them (ADR 0018).
+- **List and budgets.** Render a list of 100,000 messages and measure every number in ADR 0009. Settles whether the UI holds rows or asks the core for windows of them (ADR 0018). Answered on 2026-11-21: the UI asks the core for windows, and the measurements are in [../research/list.md](../research/list.md).
 - **Token.** Read or renew the development token for Vercel's hosted board from Rust. Answered on 2026-11-20: ADR 0022.
 
 ## 4. The app

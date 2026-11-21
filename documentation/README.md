@@ -73,6 +73,7 @@ The rules for writing code are in `CLAUDE.md` at the repository root.
 
 - [research/board.md](research/board.md): what Vercel shipped, the protocol, its limits, how a client authenticates and finds a local board, and what copying and following a whole board costs.
 - [research/landscape.md](research/landscape.md): community UIs for Board and the neighbouring market.
+- [research/list.md](research/list.md): the list spike: windows against the whole list, frames, cold start and memory with 100,000 messages.
 - [research/stack.md](research/stack.md): Tauri, GPUI, sync engines and fonts.
 
 ## Journal
