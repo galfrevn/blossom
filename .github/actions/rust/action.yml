@@ -6,21 +6,20 @@ inputs:
     description: The pinned toolchain version.
     required: true
   components:
-    description: The toolchain components to install.
+    description: The toolchain components to install, separated by commas.
     required: true
 
 runs:
   using: composite
   steps:
-    - uses: dtolnay/rust-toolchain@master
-      with:
-        toolchain: ${{ inputs.toolchain }}
-        components: ${{ inputs.components }}
-    - name: remove every toolchain but the pinned one
+    - name: install the pinned toolchain and remove every other one
       shell: bash
       env:
         PINNED_TOOLCHAIN: ${{ inputs.toolchain }}
+        COMPONENTS: ${{ inputs.components }}
       run: |
+        rustup toolchain install "$PINNED_TOOLCHAIN" --profile minimal --component "$COMPONENTS" --no-self-update
+        rustup default "$PINNED_TOOLCHAIN"
         for installed_toolchain in $(rustup toolchain list --quiet); do
           case "$installed_toolchain" in
             "$PINNED_TOOLCHAIN"-*) ;;
@@ -28,6 +27,6 @@ runs:
           esac
         done
         rustup toolchain list
-    - uses: Swatinem/rust-cache@v2
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}

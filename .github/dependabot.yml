@@ -1,0 +1,43 @@
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/rust
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+      include: scope
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      crates:
+        patterns: ["*"]
+    commit-message:
+      prefix: build
+      include: scope
+
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      packages:
+        patterns: ["*"]
+    commit-message:
+      prefix: build
+      include: scope
