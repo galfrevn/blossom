@@ -1,7 +1,8 @@
 use std::convert::Infallible;
 use std::fmt;
 
-use reqwest::{Client, Response};
+use reqwest::{Client, Response, StatusCode};
+use serde::Deserialize;
 use tokio::time::Instant;
 
 use crate::access::BoardAccess;
@@ -18,6 +19,7 @@ pub enum FollowError {
     InvalidEvent(serde_json::Error),
     Storage(StorageError),
     BoardGone,
+    CursorRefused,
 }
 
 impl fmt::Display for FollowError {
@@ -32,6 +34,9 @@ impl fmt::Display for FollowError {
             }
             FollowError::Storage(error) => write!(formatter, "{error}"),
             FollowError::BoardGone => write!(formatter, "the board stopped answering"),
+            FollowError::CursorRefused => {
+                write!(formatter, "the board refused the replica's cursor")
+            }
         }
     }
 }
@@ -62,7 +67,10 @@ pub async fn follow_feed(
     loop {
         let opening = open_stream(&client, access, &cursor);
         let opened = tokio::time::timeout(pacing.longest_wait_for_a_stream, opening).await;
-        let Ok(Some(mut stream)) = opened else {
+        if let Ok(Opening::CursorRefused) = opened {
+            return Err(FollowError::CursorRefused);
+        }
+        let Ok(Opening::Opened(mut stream)) = opened else {
             report(ReplicaState::Reconnecting { stored });
             retries
                 .wait_after_failure()
@@ -116,16 +124,43 @@ pub async fn follow_feed(
     }
 }
 
-async fn open_stream(client: &Client, access: &BoardAccess, cursor: &str) -> Option<Response> {
-    let response = client
+enum Opening {
+    Opened(Response),
+    CursorRefused,
+    Failed,
+}
+
+#[derive(Deserialize)]
+struct BoardRefusal {
+    error: RefusalReason,
+}
+
+#[derive(Deserialize)]
+struct RefusalReason {
+    code: String,
+}
+
+async fn open_stream(client: &Client, access: &BoardAccess, cursor: &str) -> Opening {
+    let sent = client
         .get(format!("{}/events", access.url()))
         .bearer_auth(access.token())
         .header("accept", "text/event-stream")
         .header("last-event-id", cursor)
         .send()
-        .await
-        .ok()?;
-    response.error_for_status().ok()
+        .await;
+    let Ok(response) = sent else {
+        return Opening::Failed;
+    };
+    if response.status().is_success() {
+        return Opening::Opened(response);
+    }
+    if response.status() != StatusCode::BAD_REQUEST {
+        return Opening::Failed;
+    }
+    match response.json::<BoardRefusal>().await {
+        Ok(refusal) if refusal.error.code == "invalid_cursor" => Opening::CursorRefused,
+        _ => Opening::Failed,
+    }
 }
 
 fn views_in(frames: &[Frame]) -> Result<Vec<MessageView>, FollowError> {

@@ -1,6 +1,8 @@
+use std::cmp::Reverse;
 use std::fmt;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::Deserialize;
@@ -8,10 +10,61 @@ use serde_json::Value;
 
 use crate::access::BoardAccess;
 
-pub fn replica_file(replicas_folder: &Path, access: &BoardAccess) -> PathBuf {
-    let file_stem: String = access
-        .url()
-        .chars()
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoardIdentity {
+    pub oldest_id: String,
+    pub oldest_created_at: String,
+}
+
+const REPLICA_EXTENSION: &str = ".sqlite";
+const NEW_REPLICA_NAME: &str = "new";
+
+pub fn replica_file_for(
+    replicas_folder: &Path,
+    access: &BoardAccess,
+    identity: &BoardIdentity,
+) -> PathBuf {
+    let address = file_name_part(access.url());
+    let created_at = file_name_part(&identity.oldest_created_at);
+    let id = file_name_part(&identity.oldest_id);
+    replicas_folder.join(format!("{address}.{created_at}.{id}{REPLICA_EXTENSION}"))
+}
+
+pub fn new_replica_file(replicas_folder: &Path, access: &BoardAccess) -> PathBuf {
+    let address = file_name_part(access.url());
+    replicas_folder.join(format!("{address}.{NEW_REPLICA_NAME}{REPLICA_EXTENSION}"))
+}
+
+pub fn known_replica_files(replicas_folder: &Path, access: &BoardAccess) -> Vec<PathBuf> {
+    let address_prefix = format!("{}.", file_name_part(access.url()));
+    let new_replica = new_replica_file(replicas_folder, access);
+    let Ok(entries) = fs::read_dir(replicas_folder) else {
+        return Vec::new();
+    };
+    let mut known: Vec<(SystemTime, PathBuf)> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|file| *file != new_replica)
+        .filter(|file| {
+            file.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name.starts_with(&address_prefix) && name.ends_with(REPLICA_EXTENSION)
+                })
+        })
+        .map(|file| {
+            let modified = fs::metadata(&file)
+                .and_then(|metadata| metadata.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            (modified, file)
+        })
+        .collect();
+    known.sort_by_key(|(modified, _)| Reverse(*modified));
+    known.into_iter().map(|(_, file)| file).collect()
+}
+
+fn file_name_part(text: &str) -> String {
+    text.chars()
         .map(|character| {
             if character.is_ascii_alphanumeric() {
                 character.to_ascii_lowercase()
@@ -19,8 +72,7 @@ pub fn replica_file(replicas_folder: &Path, access: &BoardAccess) -> PathBuf {
                 '-'
             }
         })
-        .collect();
-    replicas_folder.join(format!("{file_stem}.sqlite"))
+        .collect()
 }
 
 pub struct MessageView {
@@ -116,6 +168,11 @@ impl Replica {
              CREATE TABLE IF NOT EXISTS feed (
                  only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
                  cursor TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS board (
+                 only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
+                 oldest_id TEXT NOT NULL,
+                 oldest_created_at TEXT NOT NULL
              );",
         )?;
         let message_count =
@@ -159,6 +216,34 @@ impl Replica {
             })
             .optional()?;
         Ok(cursor)
+    }
+
+    pub fn identity(&self) -> Result<Option<BoardIdentity>, ReplicaError> {
+        let identity = self
+            .connection
+            .query_row(
+                "SELECT oldest_id, oldest_created_at FROM board WHERE only_row = 1",
+                [],
+                |row| {
+                    Ok(BoardIdentity {
+                        oldest_id: row.get(0)?,
+                        oldest_created_at: row.get(1)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(identity)
+    }
+
+    pub fn keep_identity(&mut self, identity: &BoardIdentity) -> Result<(), ReplicaError> {
+        self.connection.execute(
+            "INSERT INTO board (only_row, oldest_id, oldest_created_at) VALUES (1, ?1, ?2)
+             ON CONFLICT (only_row) DO UPDATE SET
+                 oldest_id = excluded.oldest_id,
+                 oldest_created_at = excluded.oldest_created_at",
+            params![identity.oldest_id, identity.oldest_created_at],
+        )?;
+        Ok(())
     }
 
     pub fn message_count(&self) -> u32 {

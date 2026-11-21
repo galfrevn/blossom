@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use blossom::contract::{OpenBoard, ReplicaState};
-use blossom::replica::replica_file;
 use blossom::{BoardAccess, KeepingEnded, OpenBoardFollower, Pacing, keep_in_step};
 use tauri::async_runtime::JoinHandle;
 use tauri::ipc::{Channel, IpcResponse};
@@ -75,8 +74,7 @@ impl Session {
             eprintln!("blossom: there is no data folder to keep the replica in");
             return;
         };
-        let file = replica_file(replicas_folder, &access);
-        let ended = keep_in_step(&access, &file, Pacing::for_the_app(), |state| {
+        let ended = keep_in_step(&access, replicas_folder, Pacing::for_the_app(), |state| {
             self.replica_state.send_replace(Some(state));
         })
         .await;

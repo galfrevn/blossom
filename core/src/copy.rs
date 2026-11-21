@@ -9,7 +9,7 @@ use crate::access::BoardAccess;
 use crate::contract::{ReplicaState, StopReason};
 use crate::pacing::{Pacing, Retries};
 use crate::protocol::{self, FeedEvent};
-use crate::replica::{MessageView, Replica};
+use crate::replica::{BoardIdentity, MessageView, Replica};
 use crate::storage::{self, StorageError};
 
 const THREADS_PER_PAGE: &str = "500";
@@ -18,6 +18,7 @@ const CHANNELS_PER_PAGE: &str = "500";
 pub struct CopiedBoard {
     pub replica: Replica,
     pub feed_cursor: String,
+    pub identity: Option<BoardIdentity>,
 }
 
 #[derive(Debug)]
@@ -112,15 +113,15 @@ pub async fn copy_board(
         report(ReplicaState::Reconnecting { stored });
     })
     .await?;
-    let oldest_root_id = threads.oldest_root_id;
+    let identity = threads.oldest_root;
     let mut feed_cursor = threads.feed_cursor;
     (replica, stored) = storage::store(replica, threads.views, None)
         .await
         .map_err(CopyError::Storage)?;
     report(ReplicaState::Copying { stored, total });
 
-    if let Some(oldest_root_id) = oldest_root_id {
-        let mut after = oldest_root_id;
+    if let Some(oldest_root) = identity.as_ref() {
+        let mut after = oldest_root.oldest_id.clone();
         loop {
             let page: EventsPage = reader
                 .read("/events", &[("after", &after)], &mut || {
@@ -152,12 +153,13 @@ pub async fn copy_board(
     Ok(CopiedBoard {
         replica,
         feed_cursor,
+        identity,
     })
 }
 
 struct EveryThread {
     views: Vec<MessageView>,
-    oldest_root_id: Option<String>,
+    oldest_root: Option<BoardIdentity>,
     feed_cursor: String,
 }
 
@@ -166,7 +168,7 @@ async fn read_every_thread(
     on_failure: &mut impl FnMut(),
 ) -> Result<EveryThread, CopyError> {
     let mut views = Vec::new();
-    let mut oldest_root: Option<(String, String)> = None;
+    let mut oldest_root: Option<BoardIdentity> = None;
     let mut feed_cursor = None;
     let mut before: Option<String> = None;
     loop {
@@ -180,9 +182,12 @@ async fn read_every_thread(
             let root = MessageView::parse(thread.message.get()).map_err(CopyError::InvalidView)?;
             let root_is_the_oldest_yet = oldest_root
                 .as_ref()
-                .is_none_or(|(created_at, _)| root.created_at() < created_at.as_str());
+                .is_none_or(|oldest| root.created_at() < oldest.oldest_created_at.as_str());
             if root_is_the_oldest_yet {
-                oldest_root = Some((root.created_at().to_owned(), root.id().to_owned()));
+                oldest_root = Some(BoardIdentity {
+                    oldest_id: root.id().to_owned(),
+                    oldest_created_at: root.created_at().to_owned(),
+                });
             }
             views.push(root);
             if let Some(last) = thread.last {
@@ -196,7 +201,7 @@ async fn read_every_thread(
     }
     Ok(EveryThread {
         views,
-        oldest_root_id: oldest_root.map(|(_, id)| id),
+        oldest_root,
         feed_cursor: feed_cursor.unwrap_or_default(),
     })
 }

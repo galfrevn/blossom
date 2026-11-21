@@ -5,7 +5,7 @@ mod history;
 
 use std::convert::Infallible;
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use blossom::contract::{ReplicaState, StopReason};
@@ -234,9 +234,16 @@ async fn until_reported(
     states: &mut UnboundedReceiver<ReplicaState>,
     expected: &ReplicaState,
 ) -> bool {
+    until_seen(states, |state| state == expected).await
+}
+
+async fn until_seen(
+    states: &mut UnboundedReceiver<ReplicaState>,
+    wanted: impl Fn(&ReplicaState) -> bool,
+) -> bool {
     let waiting = async {
         while let Some(state) = states.recv().await {
-            if &state == expected {
+            if wanted(&state) {
                 return true;
             }
         }
@@ -245,6 +252,10 @@ async fn until_reported(
     tokio::time::timeout(Duration::from_secs(5), waiting)
         .await
         .unwrap_or(false)
+}
+
+fn copying(state: &ReplicaState) -> bool {
+    matches!(state, ReplicaState::Copying { .. })
 }
 
 #[tokio::test]
@@ -374,8 +385,7 @@ async fn a_board_that_ends_every_stream_at_once_is_asked_again_ever_more_slowly(
 
 struct Keeping {
     server: Option<MockServer>,
-    _folder: TempDir,
-    file: PathBuf,
+    folder: TempDir,
     states: UnboundedReceiver<ReplicaState>,
     task: JoinHandle<KeepingEnded>,
 }
@@ -383,24 +393,53 @@ struct Keeping {
 async fn start_keeping_in_step(board: &FakeBoard) -> Result<Keeping, Box<dyn Error>> {
     let server = MockServer::builder().start().await;
     serve_board(&server, board.clone()).await;
-    let access = BoardAccess::new(format!("{}/api/board", server.uri()), "token-of-ada");
     let folder = TempDir::new()?;
-    let file = folder.path().join("board.sqlite");
+    let (states, task) = keep_in_step_in(&server, folder.path());
+    Ok(Keeping {
+        server: Some(server),
+        folder,
+        states,
+        task,
+    })
+}
+
+fn keep_in_step_in(
+    server: &MockServer,
+    replicas_folder: &Path,
+) -> (UnboundedReceiver<ReplicaState>, JoinHandle<KeepingEnded>) {
+    let access = BoardAccess::new(format!("{}/api/board", server.uri()), "token-of-ada");
+    let replicas_folder = replicas_folder.to_path_buf();
     let (sender, states) = unbounded_channel();
-    let file_to_keep = file.clone();
     let task = tokio::spawn(async move {
-        keep_in_step(&access, &file_to_keep, quick_pacing(), |state| {
+        keep_in_step(&access, &replicas_folder, quick_pacing(), |state| {
             sender.send(state).ok();
         })
         .await
     });
-    Ok(Keeping {
-        server: Some(server),
-        _folder: folder,
-        file,
-        states,
-        task,
-    })
+    (states, task)
+}
+
+fn replica_files(replicas_folder: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(replicas_folder)? {
+        let file = entry?.path();
+        if file
+            .extension()
+            .is_some_and(|extension| extension == "sqlite")
+        {
+            files.push(file);
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+async fn threads_read(server: &MockServer) -> usize {
+    let requests = server.received_requests().await.unwrap_or_default();
+    requests
+        .iter()
+        .filter(|request| request.url.path() == "/api/board/threads")
+        .count()
 }
 
 async fn until_ended(task: JoinHandle<KeepingEnded>) -> Option<KeepingEnded> {
@@ -420,7 +459,9 @@ async fn a_board_that_stops_answering_while_followed_is_gone_and_its_replica_kep
 
     let ended = until_ended(keeping.task).await;
     assert!(matches!(ended, Some(KeepingEnded::BoardGone)));
-    assert_eq!(Replica::open(&keeping.file).unwrap().message_count(), 7);
+    let files = replica_files(keeping.folder.path()).unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(Replica::open(&files[0]).unwrap().message_count(), 7);
 }
 
 #[tokio::test]
@@ -486,11 +527,11 @@ async fn an_event_the_core_cannot_read_stops_the_replica_and_says_so() {
 async fn a_replica_that_cannot_be_opened_stops_and_says_so() {
     let folder = TempDir::new().unwrap();
     std::fs::write(folder.path().join("blocker"), "").unwrap();
-    let file = folder.path().join("blocker").join("board.sqlite");
+    let replicas_folder = folder.path().join("blocker").join("replicas");
     let access = BoardAccess::new("http://127.0.0.1:9/api/board", "token-of-ada");
     let mut reported_states = Vec::new();
 
-    let ended = keep_in_step(&access, &file, quick_pacing(), |state| {
+    let ended = keep_in_step(&access, &replicas_folder, quick_pacing(), |state| {
         reported_states.push(state);
     })
     .await;
@@ -566,4 +607,105 @@ async fn a_stream_that_falls_silent_counts_as_a_failure() {
     assert!(until_reported(&mut states, &ReplicaState::Live { stored: 0 }).await);
     assert!(until_reported(&mut states, &ReplicaState::Reconnecting { stored: 0 }).await);
     task.abort();
+}
+
+fn another_project_history() -> BoardHistory {
+    let mut history = BoardHistory::default();
+    history.post("10", "fleet/docs", "10", 40, "draft the guide");
+    history.post("11", "fleet/docs", "10", 41, "reviewing");
+    history.post("12", "fleet/docs", "12", 42, "publish");
+    history
+}
+
+#[tokio::test]
+async fn reopening_a_known_board_follows_on_without_copying_it_again() {
+    let board = FakeBoard::with_history(history_across_two_channels());
+    let mut first = start_keeping_in_step(&board).await.unwrap();
+    assert!(until_reported(&mut first.states, &ReplicaState::Live { stored: 7 }).await);
+    first.task.abort();
+    let server = first.server.take().unwrap();
+    let threads_read_by_the_copy = threads_read(&server).await;
+    board.change_history(|history| history.post("17", "fleet/www", "13", 7, "green again"));
+
+    let (mut states, task) = keep_in_step_in(&server, first.folder.path());
+
+    assert!(until_reported(&mut states, &ReplicaState::Live { stored: 8 }).await);
+    task.abort();
+    assert_eq!(threads_read(&server).await, threads_read_by_the_copy);
+    assert_eq!(replica_files(first.folder.path()).unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_refused_cursor_copies_the_board_again() {
+    let board = FakeBoard::with_history(history_across_two_channels());
+    let mut first = start_keeping_in_step(&board).await.unwrap();
+    assert!(until_reported(&mut first.states, &ReplicaState::Live { stored: 7 }).await);
+    first.task.abort();
+    let server = first.server.take().unwrap();
+    let file = replica_files(first.folder.path()).unwrap().remove(0);
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply_from_feed(&[], "a-cursor-the-board-never-gave")
+        .unwrap();
+    drop(replica);
+
+    let (mut states, task) = keep_in_step_in(&server, first.folder.path());
+
+    assert!(until_seen(&mut states, copying).await);
+    assert!(until_reported(&mut states, &ReplicaState::Live { stored: 7 }).await);
+    task.abort();
+    let files = replica_files(first.folder.path()).unwrap();
+    assert_eq!(files.len(), 1);
+    let cursor = Replica::open(&files[0]).unwrap().feed_cursor().unwrap();
+    assert_ne!(cursor.as_deref(), Some("a-cursor-the-board-never-gave"));
+}
+
+#[tokio::test]
+async fn a_different_board_at_the_same_address_gets_a_replica_of_its_own() {
+    let board = FakeBoard::with_history(history_across_two_channels());
+    let mut first = start_keeping_in_step(&board).await.unwrap();
+    assert!(until_reported(&mut first.states, &ReplicaState::Live { stored: 7 }).await);
+    first.task.abort();
+    let server = first.server.take().unwrap();
+    let first_replica = replica_files(first.folder.path()).unwrap().remove(0);
+    board.change_history(|history| *history = another_project_history());
+
+    let (mut states, task) = keep_in_step_in(&server, first.folder.path());
+
+    assert!(until_seen(&mut states, copying).await);
+    assert!(until_reported(&mut states, &ReplicaState::Live { stored: 3 }).await);
+    task.abort();
+    assert_eq!(replica_files(first.folder.path()).unwrap().len(), 2);
+    assert_eq!(Replica::open(&first_replica).unwrap().message_count(), 7);
+}
+
+#[tokio::test]
+async fn an_empty_board_is_copied_again_when_reopened() {
+    let board = FakeBoard::with_history(BoardHistory::default());
+    let mut first = start_keeping_in_step(&board).await.unwrap();
+    assert!(until_reported(&mut first.states, &ReplicaState::Live { stored: 0 }).await);
+    first.task.abort();
+    let server = first.server.take().unwrap();
+
+    let (mut states, task) = keep_in_step_in(&server, first.folder.path());
+
+    assert!(until_seen(&mut states, copying).await);
+    task.abort();
+}
+
+#[tokio::test]
+async fn a_cursor_refused_right_after_a_copy_stops_instead_of_copying_in_a_loop() {
+    let board = FakeBoard::with_history(history_across_two_channels());
+    board
+        .streams_refuse_every_cursor
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let mut keeping = start_keeping_in_step(&board).await.unwrap();
+
+    let stopped = ReplicaState::Stopped {
+        stored: 7,
+        reason: StopReason::UnreadableBoard,
+    };
+    assert!(until_reported(&mut keeping.states, &stopped).await);
+    let ended = until_ended(keeping.task).await;
+    assert!(matches!(ended, Some(KeepingEnded::Stopped(_))));
 }

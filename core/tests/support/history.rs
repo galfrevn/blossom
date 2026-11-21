@@ -96,16 +96,25 @@ impl BoardHistory {
         format!("event-{position}")
     }
 
-    fn position_after(&self, cursor: &str) -> usize {
+    fn position_after(&self, cursor: &str) -> Option<usize> {
         if let Some(position) = cursor.strip_prefix("event-") {
-            return position.parse::<usize>().unwrap_or_default() + 1;
+            return position.parse::<usize>().ok().map(|position| position + 1);
         }
         let posted_at = self.events.iter().position(|event| {
             event.carries_a_message
                 && event.message["id"] == cursor
                 && event.message["re"].is_null()
         });
-        posted_at.map_or(0, |position| position + 1)
+        posted_at.map(|position| position + 1)
+    }
+
+    fn thread_around(&self, id: &str) -> Option<Value> {
+        let message = self.current_view(id);
+        if message.is_null() {
+            return None;
+        }
+        let cursor = Self::cursor_of(self.events.len().saturating_sub(1));
+        Some(json!({ "message": message, "replies": [], "cursor": cursor, "schedules": [] }))
     }
 
     fn threads_page(&self, before: Option<&str>) -> Value {
@@ -156,8 +165,8 @@ impl BoardHistory {
         json!({ "channels": channels, "cursor": "channels", "next": Value::Null })
     }
 
-    fn events_stream(&self, after: &str) -> (String, Vec<usize>) {
-        let first = self.position_after(after);
+    fn events_stream(&self, after: &str) -> Option<(String, Vec<usize>)> {
+        let first = self.position_after(after)?;
         let last = (first + FRAMES_PER_STREAM).min(self.events.len());
         let mut body = format!(": connected\n\nid: {after}\n\n");
         for (position, event) in self.events.iter().enumerate().take(last).skip(first) {
@@ -175,11 +184,11 @@ impl BoardHistory {
                 body.push_str(&format!("id: {cursor}\n\n"));
             }
         }
-        (body, (first..last).collect())
+        Some((body, (first..last).collect()))
     }
 
-    fn events_page(&self, after: &str) -> Value {
-        let first = self.position_after(after);
+    fn events_page(&self, after: &str) -> Option<Value> {
+        let first = self.position_after(after)?;
         let last = (first + EVENTS_PER_PAGE).min(self.events.len());
         let events: Vec<Value> = (first..last)
             .filter(|position| self.events[*position].carries_a_message)
@@ -196,7 +205,7 @@ impl BoardHistory {
         } else {
             after.to_owned()
         };
-        json!({ "events": events, "cursor": cursor })
+        Some(json!({ "events": events, "cursor": cursor }))
     }
 }
 
@@ -208,6 +217,7 @@ pub struct FakeBoard {
     pub streams_to_refuse: Arc<AtomicUsize>,
     pub streams_to_stall: Arc<AtomicUsize>,
     pub streams_end_at_once: Arc<AtomicBool>,
+    pub streams_refuse_every_cursor: Arc<AtomicBool>,
     pub stream_starts: Arc<Mutex<Vec<String>>>,
     pub streamed_positions: Arc<Mutex<Vec<usize>>>,
 }
@@ -238,6 +248,13 @@ impl HistoryResponder {
         if take_one(&self.board.streams_to_refuse) {
             return ResponseTemplate::new(503);
         }
+        if self
+            .board
+            .streams_refuse_every_cursor
+            .load(Ordering::SeqCst)
+        {
+            return refused_cursor();
+        }
         if take_one(&self.board.streams_to_stall) {
             return ResponseTemplate::new(200)
                 .insert_header("content-type", "text/event-stream")
@@ -266,7 +283,9 @@ impl HistoryResponder {
             .history
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let (body, positions) = history.events_stream(&after);
+        let Some((body, positions)) = history.events_stream(&after) else {
+            return refused_cursor();
+        };
         let caught_up = positions.is_empty();
         self.board
             .streamed_positions
@@ -305,14 +324,23 @@ impl Respond for HistoryResponder {
             .history
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let body = match request.url.path() {
+        let path = request.url.path();
+        let body = match path {
             "/api/board/threads" => history.threads_page(query.get("before").map(String::as_str)),
             "/api/board/channels" => history.channels_page(),
-            "/api/board/events" => match query.get("after") {
-                Some(after) => history.events_page(after),
+            "/api/board/events" => match query.get("after").map(|after| history.events_page(after))
+            {
+                Some(Some(page)) => page,
+                Some(None) => return refused_cursor(),
                 None => return ResponseTemplate::new(400),
             },
-            _ => return ResponseTemplate::new(404),
+            _ => match path.strip_prefix("/api/board/messages/") {
+                Some(id) => match history.thread_around(id) {
+                    Some(thread) => thread,
+                    None => return message_not_found(),
+                },
+                None => return ResponseTemplate::new(404),
+            },
         };
         let response = ResponseTemplate::new(200).set_body_json(body);
         if take_one(&self.board.pages_to_slow_down) {
@@ -320,6 +348,16 @@ impl Respond for HistoryResponder {
         }
         response
     }
+}
+
+fn refused_cursor() -> ResponseTemplate {
+    let error = json!({ "error": { "code": "invalid_cursor", "message": "not a cursor here" } });
+    ResponseTemplate::new(400).set_body_json(error)
+}
+
+fn message_not_found() -> ResponseTemplate {
+    let error = json!({ "error": { "code": "message_not_found", "message": "message not found" } });
+    ResponseTemplate::new(404).set_body_json(error)
 }
 
 fn take_one(remaining: &AtomicUsize) -> bool {
@@ -335,7 +373,9 @@ pub async fn serve_board(server: &MockServer, board: FakeBoard) {
     answer_discovery_naming(server, &url).await;
     answer_me(server, "token-of-ada", "ada", "Ada Lovelace").await;
     Mock::given(method("GET"))
-        .and(path_regex("^/api/board/(threads|channels|events)$"))
+        .and(path_regex(
+            "^/api/board/(threads|channels|events|messages/[^/]+)$",
+        ))
         .respond_with(HistoryResponder { board })
         .mount(server)
         .await;

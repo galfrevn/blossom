@@ -1,5 +1,7 @@
 use blossom::BoardAccess;
-use blossom::replica::{MessageView, Replica, replica_file};
+use blossom::replica::{
+    BoardIdentity, MessageView, Replica, known_replica_files, new_replica_file, replica_file_for,
+};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -82,17 +84,82 @@ fn what_the_replica_holds_survives_reopening_it() {
     );
 }
 
+fn identity(oldest_id: &str, oldest_created_at: &str) -> BoardIdentity {
+    BoardIdentity {
+        oldest_id: String::from(oldest_id),
+        oldest_created_at: String::from(oldest_created_at),
+    }
+}
+
 #[test]
-fn each_board_address_gets_a_replica_file_of_its_own_in_the_folder() {
+fn a_replica_file_is_named_after_the_boards_address_and_oldest_message() {
     let folder = TempDir::new().unwrap();
-    let first = BoardAccess::new("http://127.0.0.1:4100/api/board", "token-a");
-    let second = BoardAccess::new("http://127.0.0.1:4200/api/board", "token-b");
+    let port_4100 = BoardAccess::new("http://127.0.0.1:4100/api/board", "token-a");
+    let port_4200 = BoardAccess::new("http://127.0.0.1:4200/api/board", "token-b");
+    let first_project = identity("10", "2026-11-20T10:00:00.000Z");
+    let second_project = identity("10", "2026-11-20T10:40:00.000Z");
 
-    let first_file = replica_file(folder.path(), &first);
+    let file = replica_file_for(folder.path(), &port_4100, &first_project);
 
-    assert_eq!(first_file.parent(), Some(folder.path()));
-    assert_eq!(first_file, replica_file(folder.path(), &first));
-    assert_ne!(first_file, replica_file(folder.path(), &second));
+    assert_eq!(file.parent(), Some(folder.path()));
+    assert_eq!(
+        file,
+        replica_file_for(folder.path(), &port_4100, &first_project)
+    );
+    assert_ne!(
+        file,
+        replica_file_for(folder.path(), &port_4100, &second_project)
+    );
+    assert_ne!(
+        file,
+        replica_file_for(folder.path(), &port_4200, &first_project)
+    );
+    assert_ne!(file, new_replica_file(folder.path(), &port_4100));
+}
+
+#[test]
+fn the_known_replicas_of_an_address_are_its_finished_copies_only() {
+    let folder = TempDir::new().unwrap();
+    let port_4100 = BoardAccess::new("http://127.0.0.1:4100/api/board", "token-a");
+    let port_4200 = BoardAccess::new("http://127.0.0.1:4200/api/board", "token-b");
+    let first_project = identity("10", "2026-11-20T10:00:00.000Z");
+    let second_project = identity("10", "2026-11-20T10:40:00.000Z");
+    for file in [
+        replica_file_for(folder.path(), &port_4100, &first_project),
+        replica_file_for(folder.path(), &port_4100, &second_project),
+        replica_file_for(folder.path(), &port_4200, &first_project),
+        new_replica_file(folder.path(), &port_4100),
+    ] {
+        Replica::open(&file).unwrap();
+    }
+
+    let mut known = known_replica_files(folder.path(), &port_4100);
+    known.sort();
+
+    let mut expected = vec![
+        replica_file_for(folder.path(), &port_4100, &first_project),
+        replica_file_for(folder.path(), &port_4100, &second_project),
+    ];
+    expected.sort();
+    assert_eq!(known, expected);
+}
+
+#[test]
+fn the_boards_identity_is_kept_across_reopening() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    assert_eq!(replica.identity().unwrap(), None);
+
+    replica
+        .keep_identity(&identity("10", "2026-11-20T10:00:00.000Z"))
+        .unwrap();
+    drop(replica);
+
+    assert_eq!(
+        Replica::open(&file).unwrap().identity().unwrap(),
+        Some(identity("10", "2026-11-20T10:00:00.000Z"))
+    );
 }
 
 #[test]
