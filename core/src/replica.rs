@@ -169,6 +169,15 @@ impl Replica {
                  only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
                  cursor TEXT NOT NULL
              );
+             CREATE INDEX IF NOT EXISTS messages_by_time ON messages (created_at, id);
+             CREATE TABLE IF NOT EXISTS arrivals (
+                 sequence INTEGER PRIMARY KEY,
+                 id TEXT NOT NULL
+             );
+             CREATE TRIGGER IF NOT EXISTS arrival_of_a_new_message AFTER INSERT ON messages
+             BEGIN
+                 INSERT INTO arrivals (id) VALUES (new.id);
+             END;
              CREATE TABLE IF NOT EXISTS channels (
                  path TEXT PRIMARY KEY
              ) WITHOUT ROWID;

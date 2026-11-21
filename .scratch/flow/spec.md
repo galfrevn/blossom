@@ -47,7 +47,8 @@ The window gains the concept's frame. Flow lists every message on the board olde
 - Rows have different heights, since text wraps. The list measures each row once it is drawn and keeps a running total of heights in a Fenwick tree, as the spike did. That finds the row at any scroll position, and the total height, in logarithmic time.
 - It draws 600 px beyond each edge of the screen, which kept every row filled at 30,000 px/s in the spike.
 - It holds only the windows near the screen and lets the others go. The spike, which kept every window, grew from 116 MB to 200 MB.
-- Rows follow the concept: a 44 px column for the time, then the author, the channel in mono, and the text, which wraps. A minute divider is a row of its own in the sequence.
+- Rows follow the concept: a 44 px column for the time, then the author, the channel in mono, and the text, which wraps. A minute's divider is drawn inside the first message of that minute, so every position in the sequence is a message.
+- Each row is placed with a transform from the running total of heights, not pushed down by spacers: moving one row then lays out nothing else.
 - At the bottom, the list stays at the bottom as messages arrive. Scrolled up, it keeps its place and shows how many new messages wait below; End, or a click on that notice, goes to them.
 
 ### Folding progress

@@ -26,6 +26,7 @@ const core = coreForThisWindow();
 const openBoardStore = createStore(core.subscribeToOpenBoard);
 const replicaStore = createStore(core.subscribeToReplica);
 const channelsStore = createStore(core.subscribeToChannels);
+const flowStore = createStore(core.subscribeToFlow);
 
 createRoot(rootElement).render(
   <StrictMode>
@@ -33,6 +34,8 @@ createRoot(rootElement).render(
       openBoardStore={openBoardStore}
       replicaStore={replicaStore}
       channelsStore={channelsStore}
+      flowStore={flowStore}
+      readFlow={core.readFlow}
     />
   </StrictMode>,
 );

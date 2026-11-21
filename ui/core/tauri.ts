@@ -1,6 +1,11 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { Core } from "./client";
-import type { OpenBoard, ReplicaState } from "./contract";
+import type {
+  FlowChange,
+  FlowWindow,
+  OpenBoard,
+  ReplicaState,
+} from "./contract";
 
 function subscribeOverChannel<Value>(
   command: string,
@@ -29,5 +34,9 @@ export function createTauriCore(): Core {
       subscribeOverChannel<ReplicaState>("subscribe_to_replica", listener),
     subscribeToChannels: (listener) =>
       subscribeOverChannel<string[]>("subscribe_to_channels", listener),
+    subscribeToFlow: (listener) =>
+      subscribeOverChannel<FlowChange>("subscribe_to_flow", listener),
+    readFlow: (start, count) =>
+      invoke<FlowWindow>("read_flow", { start, count }),
   };
 }

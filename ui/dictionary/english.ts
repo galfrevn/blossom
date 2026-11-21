@@ -1,4 +1,9 @@
 const countFormat = new Intl.NumberFormat("en-US");
+const clockTime = new Intl.DateTimeFormat("en-GB", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
 
 function count(value: number): string {
   return countFormat.format(value);
@@ -20,6 +25,13 @@ export const english = {
       title: "Flow",
       description: "Everything on the board, in order.",
     },
+  },
+  flow: {
+    onBehalfOf: (person: string) => `via ${person}`,
+    channel: (channel: string) => `#${channel}`,
+    time: (createdAt: string) => clockTime.format(new Date(createdAt)),
+    deleted: "Deleted",
+    edited: "edited",
   },
   status: {
     handle: (handle: string) => `@${handle}`,

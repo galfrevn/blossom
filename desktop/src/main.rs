@@ -2,11 +2,11 @@ mod rate;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use blossom::contract::{OpenBoard, ReplicaState};
+use blossom::contract::{FlowChange, FlowWindow, OpenBoard, ReplicaState};
 use blossom::reader::ReplicaReader;
 use blossom::{BoardAccess, KeepingEnded, OpenBoardFollower, Pacing, keep_in_step};
 use tauri::async_runtime::JoinHandle;
@@ -43,9 +43,12 @@ struct Session {
     replica_state: watch::Sender<Option<ReplicaState>>,
     reader: Mutex<Option<ReplicaReader>>,
     channels: watch::Sender<Option<Vec<String>>>,
+    flow: watch::Sender<Option<FlowChange>>,
+    flow_revision: AtomicU32,
     following_open_board: RunningTask,
     forwarding_replica_state: RunningTask,
     forwarding_channels: RunningTask,
+    forwarding_flow: RunningTask,
     keeping_in_step: RunningTask,
     open_board_gone: AtomicBool,
 }
@@ -54,14 +57,18 @@ impl Session {
     fn new(replicas_folder: Option<PathBuf>) -> Session {
         let (replica_state, _) = watch::channel(None);
         let (channels, _) = watch::channel(None);
+        let (flow, _) = watch::channel(None);
         Session {
             replicas_folder,
             replica_state,
             reader: Mutex::new(None),
             channels,
+            flow,
+            flow_revision: AtomicU32::new(0),
             following_open_board: RunningTask::default(),
             forwarding_replica_state: RunningTask::default(),
             forwarding_channels: RunningTask::default(),
+            forwarding_flow: RunningTask::default(),
             keeping_in_step: RunningTask::default(),
             open_board_gone: AtomicBool::new(false),
         }
@@ -85,7 +92,7 @@ impl Session {
         match ReplicaReader::open(file) {
             Ok(reader) => {
                 *self.reader.lock().unwrap_or_else(PoisonError::into_inner) = Some(reader);
-                self.refresh_channels();
+                self.refresh_from_the_replica();
             }
             Err(error) => eprintln!("blossom: the replica could not be read: {error}"),
         }
@@ -94,13 +101,25 @@ impl Session {
     fn forget_the_replica(&self) {
         *self.reader.lock().unwrap_or_else(PoisonError::into_inner) = None;
         self.channels.send_replace(None);
+        self.flow.send_replace(None);
     }
 
-    fn refresh_channels(&self) {
-        let reader = self.reader.lock().unwrap_or_else(PoisonError::into_inner);
-        let Some(reader) = reader.as_ref() else {
+    fn refresh_from_the_replica(&self) {
+        let mut reader = self.reader.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(reader) = reader.as_mut() else {
             return;
         };
+        if let Err(error) = reader.catch_up() {
+            eprintln!("blossom: the replica's new messages could not be read: {error}");
+        }
+        let revision = self
+            .flow_revision
+            .fetch_add(1, Ordering::SeqCst)
+            .wrapping_add(1);
+        self.flow.send_replace(Some(FlowChange {
+            total: reader.flow_total(),
+            revision,
+        }));
         match reader.channels() {
             Ok(channels) => {
                 self.channels.send_if_modified(|current| {
@@ -115,6 +134,16 @@ impl Session {
         }
     }
 
+    fn read_flow(&self, start: u32, count: u32) -> Result<FlowWindow, String> {
+        let reader = self.reader.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(reader) = reader.as_ref() else {
+            return Err(String::from("no replica is open"));
+        };
+        reader
+            .flow_window(start, count)
+            .map_err(|error| error.to_string())
+    }
+
     async fn keep_in_step(&self, access: BoardAccess) {
         let Some(replicas_folder) = self.replicas_folder.as_deref() else {
             eprintln!("blossom: there is no data folder to keep the replica in");
@@ -127,7 +156,7 @@ impl Session {
             |file| self.read_the_replica(file),
             |state| {
                 self.replica_state.send_replace(Some(state));
-                self.refresh_channels();
+                self.refresh_from_the_replica();
             },
         )
         .await;
@@ -151,6 +180,22 @@ fn subscribe_to_replica(channel: Channel<ReplicaState>, session: State<'_, Arc<S
     let receiver = session.replica_state.subscribe();
     let forwarding = tauri::async_runtime::spawn(forward(channel, receiver));
     session.forwarding_replica_state.replace(forwarding);
+}
+
+#[tauri::command]
+fn subscribe_to_flow(channel: Channel<FlowChange>, session: State<'_, Arc<Session>>) {
+    let receiver = session.flow.subscribe();
+    let forwarding = tauri::async_runtime::spawn(forward(channel, receiver));
+    session.forwarding_flow.replace(forwarding);
+}
+
+#[tauri::command]
+fn read_flow(
+    start: u32,
+    count: u32,
+    session: State<'_, Arc<Session>>,
+) -> Result<FlowWindow, String> {
+    session.read_flow(start, count)
 }
 
 #[tauri::command]
@@ -229,7 +274,9 @@ fn main() -> ExitCode {
         .invoke_handler(tauri::generate_handler![
             subscribe_to_open_board,
             subscribe_to_replica,
-            subscribe_to_channels
+            subscribe_to_channels,
+            subscribe_to_flow,
+            read_flow
         ])
         .on_page_load(|webview, payload| {
             if payload.event() != PageLoadEvent::Finished {

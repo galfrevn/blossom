@@ -8,6 +8,9 @@ pub fn typescript() -> String {
         OpenBoard::decl(&configuration),
         StopReason::decl(&configuration),
         ReplicaState::decl(&configuration),
+        FlowRow::decl(&configuration),
+        FlowWindow::decl(&configuration),
+        FlowChange::decl(&configuration),
     ];
     declarations
         .iter()
@@ -54,4 +57,31 @@ impl ReplicaState {
 pub enum StopReason {
     UnreadableBoard,
     UnwritableReplica,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowRow {
+    pub id: String,
+    pub channel: String,
+    pub author: String,
+    pub on_behalf_of: Option<String>,
+    pub created_at: String,
+    pub text: String,
+    pub edited: bool,
+    pub deleted: bool,
+    pub first_of_its_minute: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+pub struct FlowWindow {
+    pub total: u32,
+    pub start: u32,
+    pub rows: Vec<FlowRow>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+pub struct FlowChange {
+    pub total: u32,
+    pub revision: u32,
 }

@@ -1,4 +1,9 @@
-import type { OpenBoard, ReplicaState } from "./contract";
+import type {
+  FlowChange,
+  FlowWindow,
+  OpenBoard,
+  ReplicaState,
+} from "./contract";
 
 export type Core = {
   subscribeToOpenBoard: (
@@ -8,4 +13,6 @@ export type Core = {
     listener: (replicaState: ReplicaState) => void,
   ) => () => void;
   subscribeToChannels: (listener: (channels: string[]) => void) => () => void;
+  subscribeToFlow: (listener: (change: FlowChange) => void) => () => void;
+  readFlow: (start: number, count: number) => Promise<FlowWindow>;
 };
