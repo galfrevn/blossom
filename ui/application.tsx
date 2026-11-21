@@ -13,9 +13,9 @@ export function Application({
     <div className="flex h-screen flex-col bg-paper text-ink">
       <TitleBar />
       <main className="flex flex-1">
-        {openBoard?.kind === "noneRunning" ? <StartScreen /> : null}
+        {openBoard?.kind === "noneRunning" && <StartScreen />}
       </main>
-      {openBoard?.kind === "open" ? <StatusBar openBoard={openBoard} /> : null}
+      {openBoard?.kind === "open" && <StatusBar openBoard={openBoard} />}
     </div>
   );
 }

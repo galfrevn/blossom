@@ -47,6 +47,6 @@
     font-family: var(--font-sans);
     font-size: 13px;
     -webkit-font-smoothing: antialiased;
-    user-select: none;
+    @apply select-none;
   }
 }

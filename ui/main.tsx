@@ -17,7 +17,7 @@ function coreForThisWindow(): Core {
   return fakeCore.core;
 }
 
-const rootElement = document.getElementById("root");
+const rootElement = document.querySelector("#root");
 if (rootElement === null) {
   throw new Error("index.html has no element with the id root");
 }

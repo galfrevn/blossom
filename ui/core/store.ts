@@ -3,8 +3,8 @@ import type { Core } from "./client";
 import type { OpenBoard } from "./contract";
 
 export type OpenBoardStore = {
-  subscribe(onChange: () => void): () => void;
-  getSnapshot(): OpenBoard | undefined;
+  subscribe: (onChange: () => void) => () => void;
+  getSnapshot: () => OpenBoard | undefined;
 };
 
 export function createOpenBoardStore(core: Core): OpenBoardStore {

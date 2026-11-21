@@ -13,13 +13,80 @@
     "indentWidth": 2
   },
   "linter": {
+    "domains": {
+      "project": "all",
+      "react": "all",
+      "tailwind": "all",
+      "test": "all",
+      "types": "all",
+      "astro": "none",
+      "drizzle": "none",
+      "next": "none",
+      "playwright": "none",
+      "qwik": "none",
+      "reactNative": "none",
+      "solid": "none",
+      "svelte": "none",
+      "tanstackQuery": "none",
+      "turborepo": "none",
+      "vue": "none"
+    },
     "rules": {
-      "preset": "recommended",
-      "suspicious": {
-        "noExplicitAny": "error"
-      }
+      "a11y": "error",
+      "complexity": "error",
+      "correctness": "error",
+      "performance": "error",
+      "security": "error",
+      "style": "error",
+      "suspicious": "error"
     }
   },
+  "overrides": [
+    {
+      "includes": ["**"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "useImportExtensions": "off",
+            "noUnresolvedImports": "off"
+          },
+          "style": {
+            "useConsistentTypeDefinitions": {
+              "level": "error",
+              "options": {
+                "style": "type"
+              }
+            },
+            "useConsistentTestIt": {
+              "level": "error",
+              "options": {
+                "function": "test",
+                "withinDescribe": "test"
+              }
+            }
+          },
+          "suspicious": {
+            "noConsole": {
+              "level": "error",
+              "options": {
+                "allow": ["error"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["ui/vite.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "off"
+          }
+        }
+      }
+    }
+  ],
   "css": {
     "parser": {
       "tailwindDirectives": true

@@ -6,7 +6,7 @@
     "dev": "vite --config vite.ts",
     "build": "vite build --config vite.ts",
     "test": "vitest run --config vite.ts",
-    "types": "tsc --noEmit --project tsconfig.json"
+    "types": "bun check --project tsconfig.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.5",

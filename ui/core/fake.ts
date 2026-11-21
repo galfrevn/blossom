@@ -3,7 +3,7 @@ import type { OpenBoard } from "./contract";
 
 export type FakeCore = {
   core: Core;
-  push(openBoard: OpenBoard): void;
+  push: (openBoard: OpenBoard) => void;
 };
 
 export function createFakeCore(): FakeCore {
