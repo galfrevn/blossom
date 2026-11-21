@@ -10,6 +10,11 @@ inputs:
     required: false
     default: ""
 
+outputs:
+  cache-hit:
+    description: Whether the Rust cache was restored with a full match.
+    value: ${{ steps.cache.outputs.cache-hit }}
+
 runs:
   using: composite
   steps:
@@ -32,6 +37,7 @@ runs:
           esac
         done
         rustup toolchain list
-    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+    - id: cache
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}

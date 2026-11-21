@@ -34,8 +34,34 @@ case "${1:-}" in
     measured_bytes=$(wc -c < "$disk_image" | tr -d ' ')
     report_against_budget "the disk image" "$measured_bytes" 15000000 MB
     ;;
+  time)
+    job_name=${2:-}
+    budget_seconds=${3:-}
+    if [ -z "$job_name" ] || [ -z "$budget_seconds" ]; then
+      echo "usage: sh budgets.sh time <job> <budget in seconds>" >&2
+      exit 2
+    fi
+    if [ -z "${JOB_STARTED_AT:-}" ]; then
+      echo "JOB_STARTED_AT is not set: the job's first step has to record it" >&2
+      exit 2
+    fi
+    elapsed_seconds=$(($(date +%s) - JOB_STARTED_AT))
+    cache_state="cold, the rust cache did not match in full"
+    if [ "${RUST_CACHE_FULL_MATCH:-}" = "true" ]; then
+      cache_state="warm"
+    fi
+    result="$job_name: $elapsed_seconds s of $budget_seconds s, $cache_state"
+    echo "$result"
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+      echo "$result" >> "$GITHUB_STEP_SUMMARY"
+    fi
+    if [ "$cache_state" = "warm" ] && [ "$elapsed_seconds" -gt "$budget_seconds" ]; then
+      echo "$job_name is over its time budget in documentation/adr/architecture/pipeline.md" >&2
+      exit 1
+    fi
+    ;;
   *)
-    echo "usage: sh budgets.sh javascript|installer" >&2
+    echo "usage: sh budgets.sh javascript|installer|time" >&2
     exit 2
     ;;
 esac

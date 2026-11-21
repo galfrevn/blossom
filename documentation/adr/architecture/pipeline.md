@@ -19,6 +19,14 @@ One person pushes straight to `main`, so CI is the only thing between a commit a
 - **The Rust cache depends only on the pinned toolchain and the lockfile.** Before the cache is restored, CI removes every toolchain except the pinned one. `Swatinem/rust-cache` hashes every toolchain installed on the runner into its key. Runner images ship different extras (image `20261102` of `macos-26-arm64` carried Rust 1.99.1, and `20261117` did not), so the same commit got two keys and missed the cache during each image rollout.
 - **Time budgets.** A push gets its result in under 2 minutes at the median and under 3 at the 95th percentile. A job fails when it runs over its budget on a full cache match. A run that starts with a cold cache is reported as cold and is capped by the job's timeout. It happens when a new toolchain invalidates the cache, about once every six weeks. No retries, no wider timeouts, no skipped tests.
 
+| Job | Budget, warm | Timeout |
+| --- | --- | --- |
+| `linux`: conventions, core and UI | 70 s | 3 min |
+| `desktop`: Clippy on the shell | 60 s | 3 min |
+| `installer`: the disk image | 150 s | 8 min |
+
+A budget is measured from the job's first step to its last check, and it is about 1.3 times the slowest warm run measured. A timeout is about 1.5 times the slowest cold run, rounded up to whole minutes. Neither is raised to make a run pass. The measurements are in `.scratch/pipeline/issues/07.md`.
+
 ## Considered options
 
 - **Turning off `rust-cache`'s environment hash** (`add-rust-environment-hash-key: false`) and putting the toolchain in the key by hand. Rejected: the same switch drops the hash of `Cargo.lock` and every `Cargo.toml`. After a dependency change, the old cache would restore as a full match, `rust-cache` would skip saving it, and every later run would rebuild the changed crates.
