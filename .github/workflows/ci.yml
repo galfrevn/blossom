@@ -52,7 +52,7 @@ jobs:
       - run: bun run --cwd ui test
       - run: bun run --cwd ui build
       - run: sh budgets.sh javascript
-      - run: sh budgets.sh time linux 70
+      - run: sh budgets.sh time linux 1
         env:
           RUST_CACHE_FULL_MATCH: ${{ steps.rust.outputs.cache-hit }}
 
