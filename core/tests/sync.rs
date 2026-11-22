@@ -188,10 +188,10 @@ async fn an_edit_in_the_feed_is_copied_as_it_stands_now() {
 async fn a_page_of_the_feed_with_no_messages_does_not_end_the_copy() {
     let mut history = BoardHistory::default();
     history.post("10", "fleet/www", "10", 0, "deploy www");
-    history.bookkeeping();
-    history.bookkeeping();
-    history.bookkeeping();
-    history.bookkeeping();
+    history.hidden_event();
+    history.hidden_event();
+    history.hidden_event();
+    history.hidden_event();
     history.post("11", "fleet/www", "10", 1, "looking");
 
     let copy = copy_of(&history).await.unwrap();
@@ -380,12 +380,12 @@ async fn an_edit_while_followed_replaces_the_message() {
 }
 
 #[tokio::test]
-async fn the_feed_cursor_is_kept_as_the_feed_advances_even_past_bookkeeping() {
+async fn the_feed_cursor_is_kept_as_the_feed_advances_even_past_events_it_does_not_show() {
     let board = FakeBoard::with_history(history_across_two_channels());
     let mut following = copy_then_follow(&board).await.unwrap();
 
     board.change_history(|history| {
-        history.bookkeeping();
+        history.hidden_event();
         history.post("17", "fleet/www", "13", 7, "green again");
     });
 
@@ -1246,4 +1246,95 @@ async fn a_replica_made_before_task_events_were_kept_is_copied_again() {
     assert!(!outdated_file.exists());
     let replica = Replica::open(&files[0]).unwrap();
     assert_eq!(replica.task("10").unwrap().unwrap().state, "completed");
+}
+
+fn a_task_claimed_by_claude() -> BoardHistory {
+    let mut history = BoardHistory::default();
+    history.post("10", "work", "10", 0, "deploy www");
+    history.create_task("10", &julian(), 1, None, &[]);
+    history.claim_task("10", &claude(), 2);
+    history
+}
+
+#[tokio::test]
+async fn the_copy_keeps_a_renewal_among_its_task_s_events() {
+    let mut history = a_task_claimed_by_claude();
+    history.renew_task("10", &claude(), 5);
+
+    let copy = copy_of(&history).await.unwrap();
+
+    let kept: Vec<String> = copy
+        .copied
+        .replica
+        .task_events("10")
+        .unwrap()
+        .into_iter()
+        .map(|event| event.event_type)
+        .collect();
+    assert_eq!(kept, ["task.created", "task.claimed", "task.renewed"]);
+}
+
+#[tokio::test]
+async fn a_renewal_in_the_feed_moves_the_lease_of_its_claim() {
+    let board = FakeBoard::with_history(a_task_claimed_by_claude());
+    let mut following = copy_then_follow(&board).await.unwrap();
+
+    board.change_history(|history| {
+        history.renew_task("10", &claude(), 5);
+        history.post("11", "work", "10", 6, "still deploying");
+    });
+
+    assert!(until_reported(&mut following.states, &ReplicaState::Live { stored: 2 }).await);
+    following.task.abort();
+    let replica = Replica::open(&following.file).unwrap();
+    assert_eq!(
+        replica.task("10").unwrap().unwrap().claim,
+        Some(Claim {
+            actor: claude().id,
+            until: lease_until(5),
+        })
+    );
+}
+
+#[tokio::test]
+async fn an_actor_seen_in_the_feed_keeps_its_latest_details() {
+    let mut history = BoardHistory::default();
+    history.post_as(&claude(), "10", "work", "10", 0, "deploy www");
+    let board = FakeBoard::with_history(history);
+    let mut following = copy_then_follow(&board).await.unwrap();
+    let renamed = claude().renamed("claude-opus");
+
+    board.change_history(|history| {
+        history.see_actor(&renamed, 1);
+        history.post("11", "work", "10", 2, "who is that?");
+    });
+
+    assert!(until_reported(&mut following.states, &ReplicaState::Live { stored: 2 }).await);
+    following.task.abort();
+    let replica = Replica::open(&following.file).unwrap();
+    assert_eq!(
+        replica.actor(&claude().id).unwrap().map(|actor| actor.name),
+        Some(String::from("claude-opus"))
+    );
+}
+
+#[tokio::test]
+async fn bookkeeping_that_concerns_no_message_is_read_and_skipped() {
+    let mut history = history_across_two_channels();
+    history.sync_thread("10", 6);
+    let board = FakeBoard::with_history(history);
+    let mut following = copy_then_follow(&board).await.unwrap();
+
+    board.change_history(|history| {
+        history.sync_thread("13", 7);
+        history.post("17", "fleet/www", "13", 7, "green again");
+    });
+
+    assert!(until_reported(&mut following.states, &ReplicaState::Live { stored: 8 }).await);
+    following.task.abort();
+    let replica = Replica::open(&following.file).unwrap();
+    assert_eq!(
+        replica.feed_cursor().unwrap(),
+        Some(String::from("event-13"))
+    );
 }

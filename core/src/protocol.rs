@@ -11,6 +11,7 @@ use crate::replica::Actor;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const ACTORS_PER_REQUEST: usize = 100;
+pub(crate) const WITH_BOOKKEEPING: (&str, &str) = ("all", "true");
 
 #[derive(Deserialize)]
 pub(crate) struct ListedActors {

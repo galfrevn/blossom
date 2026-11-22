@@ -353,3 +353,53 @@ async fn the_fleet_follows_the_replica() {
         }]
     );
 }
+
+#[tokio::test]
+async fn an_agent_that_renews_its_claim_is_not_read_as_lapsed() {
+    let mut history = a_board_with_tasks();
+    history.claim_task("11", &deployer(), 7);
+    let board = FakeBoard::with_history(history);
+    let server = MockServer::start().await;
+    serve_board(&server, board.clone()).await;
+    let access = BoardAccess::new(format!("{}/api/board", server.uri()), "token-of-ada");
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let copy = copy_board(
+        &access,
+        Replica::open(&file).unwrap(),
+        quick_pacing(),
+        |_| {},
+        || {},
+    )
+    .await
+    .unwrap();
+    let (sender, mut states) = unbounded_channel();
+    let following = tokio::spawn(async move {
+        follow_feed(
+            &access,
+            copy.replica,
+            copy.feed_cursor,
+            quick_pacing(),
+            |state| {
+                sender.send(state).ok();
+            },
+        )
+        .await
+    });
+
+    board.change_history(|history| {
+        history.renew_task("11", &deployer(), 11);
+        history.post("13", "work", "11", 11, "reviewing");
+    });
+
+    assert!(until_live_with(&mut states, 3).await);
+    following.abort();
+    let reader = ReplicaReader::open(&file).unwrap();
+    assert_eq!(
+        reader.fleet(&time_at(14)).unwrap(),
+        vec![Agent {
+            holds: holding("11", 11),
+            ..idle(&deployer(), "julian", "work")
+        }]
+    );
+}

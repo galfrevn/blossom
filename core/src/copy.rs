@@ -163,8 +163,9 @@ pub async fn copy_board(
     if let Some(oldest_root) = identity.as_ref() {
         let mut after = oldest_root.oldest_id.clone();
         loop {
+            let query = [("after", after.as_str()), protocol::WITH_BOOKKEEPING];
             let page: EventsPage = reader
-                .read(&["events"], &[("after", &after)], &mut || {
+                .read(&["events"], &query, &mut || {
                     report(ReplicaState::Reconnecting { stored });
                 })
                 .await?;

@@ -4,15 +4,25 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 
 use super::MessageView;
-use super::actors::Actor;
+use super::actors::{Actor, ActorDetails};
 use super::tasks::{TASK_EVENT_PREFIX, TaskEvent};
+
+const ACTOR_SEEN: &str = "actor.seen";
 
 #[derive(Deserialize)]
 struct FeedEvent {
     #[serde(rename = "type")]
     event_type: String,
+    payload: Box<RawValue>,
     message: Option<Box<RawValue>>,
     actor: Option<Actor>,
+}
+
+#[derive(Deserialize)]
+struct SeenActor {
+    actor: String,
+    #[serde(flatten)]
+    details: ActorDetails,
 }
 
 #[derive(Default)]
@@ -43,6 +53,10 @@ impl Batch {
         }
         if let Some(actor) = event.actor {
             self.keep_latest_details_of(actor);
+        }
+        if event.event_type == ACTOR_SEEN {
+            let seen: SeenActor = serde_json::from_str(event.payload.get())?;
+            self.keep_latest_details_of(seen.details.of_actor(seen.actor));
         }
         Ok(())
     }

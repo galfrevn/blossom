@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 use std::fmt;
 
-use reqwest::{Client, Response, StatusCode};
+use reqwest::{Client, Response, StatusCode, Url};
 use serde::Deserialize;
 use tokio::time::Instant;
 
@@ -148,8 +148,13 @@ struct RefusalReason {
 }
 
 async fn open_stream(client: &Client, access: &BoardAccess, cursor: &str) -> Opening {
+    let Ok(mut address) = Url::parse(&format!("{}/events", access.url())) else {
+        return Opening::Failed;
+    };
+    let (key, value) = protocol::WITH_BOOKKEEPING;
+    address.query_pairs_mut().append_pair(key, value);
     let sent = client
-        .get(format!("{}/events", access.url()))
+        .get(address)
         .bearer_auth(access.token())
         .header("accept", "text/event-stream")
         .header("last-event-id", cursor)

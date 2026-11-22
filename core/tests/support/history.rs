@@ -90,6 +90,20 @@ impl FakeActor {
     fn by(&self) -> Value {
         json!({ "actor": self.id, "principal": self.principal, "profile": self.profile })
     }
+
+    fn seen(&self) -> Value {
+        let mut seen = self.author();
+        seen["actor"] = Value::from(self.id.as_str());
+        seen["verified"] = Value::from(true);
+        seen
+    }
+
+    pub fn renamed(&self, name: &str) -> FakeActor {
+        FakeActor {
+            name: name.to_owned(),
+            ..self.clone()
+        }
+    }
 }
 
 fn the_person_with_the_token() -> FakeActor {
@@ -102,21 +116,28 @@ struct DeliveredEvent {
     created_at: String,
     payload: Value,
     actor: Option<FakeActor>,
-    message: Value,
+    message: Option<Value>,
+    bookkeeping: bool,
+}
+
+impl DeliveredEvent {
+    fn is_shown(&self, with_bookkeeping: bool) -> bool {
+        with_bookkeeping || !self.bookkeeping
+    }
 }
 
 #[derive(Clone)]
 enum HistoryEvent {
     Delivered(Box<DeliveredEvent>),
-    Bookkeeping,
+    Hidden,
     Unreadable,
 }
 
 impl HistoryEvent {
     fn message(&self) -> Option<&Value> {
         match self {
-            HistoryEvent::Delivered(delivered) => Some(&delivered.message),
-            HistoryEvent::Bookkeeping | HistoryEvent::Unreadable => None,
+            HistoryEvent::Delivered(delivered) => delivered.message.as_ref(),
+            HistoryEvent::Hidden | HistoryEvent::Unreadable => None,
         }
     }
 }
@@ -177,7 +198,8 @@ impl BoardHistory {
             created_at: time_at(minute),
             payload,
             actor: Some(author.clone()),
-            message,
+            message: Some(message),
+            bookkeeping: false,
         });
     }
 
@@ -193,7 +215,8 @@ impl BoardHistory {
             created_at,
             payload,
             actor: Some(author),
-            message,
+            message: Some(message),
+            bookkeeping: false,
         });
     }
 
@@ -202,8 +225,53 @@ impl BoardHistory {
             .push(HistoryEvent::Delivered(Box::new(delivered)));
     }
 
-    pub fn bookkeeping(&mut self) {
-        self.events.push(HistoryEvent::Bookkeeping);
+    fn keep_books(&mut self, event_type: &str, minute: u32, payload: Value) {
+        self.deliver(DeliveredEvent {
+            event_type: event_type.to_owned(),
+            created_at: time_at(minute),
+            payload,
+            actor: None,
+            message: None,
+            bookkeeping: true,
+        });
+    }
+
+    pub fn hidden_event(&mut self) {
+        self.events.push(HistoryEvent::Hidden);
+    }
+
+    pub fn see_actor(&mut self, actor: &FakeActor, minute: u32) {
+        self.keep_books("actor.seen", minute, actor.seen());
+    }
+
+    pub fn sync_thread(&mut self, root_id: &str, minute: u32) {
+        let thread = self.current_view(root_id)["thread"].clone();
+        let target = "slack:C0123ABC";
+        let by = the_person_with_the_token().by();
+        let thread_synced = json!({
+            "thread": thread,
+            "target": target,
+            "cause": "request",
+            "kind": "channel",
+            "by": by
+        });
+        let message_synced = json!({
+            "id": root_id,
+            "thread": thread,
+            "target": target,
+            "external": { "thread": "1727.1234", "message": "1727.1234" },
+            "syncedBy": Value::Null
+        });
+        let files_synced = json!({
+            "id": root_id,
+            "thread": thread,
+            "target": target,
+            "files": Value::Null,
+            "syncedBy": Value::Null
+        });
+        self.keep_books("thread.synced", minute, thread_synced);
+        self.keep_books("message.synced", minute, message_synced);
+        self.keep_books("message.files_synced", minute, files_synced);
     }
 
     pub fn unreadable_event(&mut self) {
@@ -250,6 +318,19 @@ impl BoardHistory {
             task["state"] = Value::from("claimed");
             task["epoch"] = Value::from(epoch);
             task["claim"] = claim;
+        });
+    }
+
+    pub fn renew_task(&mut self, id: &str, by: &FakeActor, minute: u32) {
+        let until = lease_until(minute);
+        let claim = json!({ "actor": by.id, "until": until });
+        let payload = json!({ "epoch": self.task_epoch(id), "until": until });
+        let renewal = self.task_changed(id, "task.renewed", minute, Some(by), payload, |task| {
+            task["claim"] = claim;
+        });
+        self.deliver(DeliveredEvent {
+            bookkeeping: true,
+            ..renewal
         });
     }
 
@@ -325,9 +406,22 @@ impl BoardHistory {
         event_type: &str,
         minute: u32,
         by: Option<&FakeActor>,
-        mut payload: Value,
+        payload: Value,
         change: impl FnOnce(&mut Value),
     ) {
+        let delivered = self.task_changed(id, event_type, minute, by, payload, change);
+        self.deliver(delivered);
+    }
+
+    fn task_changed(
+        &self,
+        id: &str,
+        event_type: &str,
+        minute: u32,
+        by: Option<&FakeActor>,
+        mut payload: Value,
+        change: impl FnOnce(&mut Value),
+    ) -> DeliveredEvent {
         let mut root = self.current_view(id);
         root["version"] = Value::from(self.next_version());
         change(&mut root["task"]);
@@ -336,13 +430,14 @@ impl BoardHistory {
         if let Some(by) = by {
             payload["by"] = by.by();
         }
-        self.deliver(DeliveredEvent {
+        DeliveredEvent {
             event_type: event_type.to_owned(),
             created_at: time_at(minute),
             payload,
             actor: by.cloned(),
-            message: root,
-        });
+            message: Some(root),
+            bookkeeping: false,
+        }
     }
 
     fn task_epoch(&self, id: &str) -> u64 {
@@ -378,7 +473,7 @@ impl BoardHistory {
         let mut listed = BTreeMap::new();
         let actors_who_acted = self.events.iter().filter_map(|event| match event {
             HistoryEvent::Delivered(delivered) => delivered.actor.as_ref(),
-            HistoryEvent::Bookkeeping | HistoryEvent::Unreadable => None,
+            HistoryEvent::Hidden | HistoryEvent::Unreadable => None,
         });
         for actor in actors_who_acted {
             listed.insert(actor.id.clone(), actor.clone());
@@ -414,9 +509,11 @@ impl BoardHistory {
             "cursor": Self::cursor_of(position),
             "type": delivered.event_type,
             "createdAt": delivered.created_at,
-            "payload": delivered.payload,
-            "message": delivered.message
+            "payload": delivered.payload
         });
+        if let Some(message) = &delivered.message {
+            served["message"] = message.clone();
+        }
         if let Some(actor) = &delivered.actor {
             served["actor"] = actor.listed();
         }
@@ -526,18 +623,18 @@ impl BoardHistory {
         json!({ "actors": actors, "cursor": self.latest_cursor() })
     }
 
-    fn events_stream(&self, after: &str) -> Option<(String, Vec<usize>)> {
+    fn events_stream(&self, after: &str, with_bookkeeping: bool) -> Option<(String, Vec<usize>)> {
         let first = self.position_after(after)?;
         let last = (first + FRAMES_PER_STREAM).min(self.events.len());
         let mut body = format!(": connected\n\nid: {after}\n\n");
         for (position, event) in self.events.iter().enumerate().take(last).skip(first) {
             let cursor = Self::cursor_of(position);
             match event {
-                HistoryEvent::Delivered(delivered) => {
+                HistoryEvent::Delivered(delivered) if delivered.is_shown(with_bookkeeping) => {
                     let data = Self::served_event(position, delivered);
                     body.push_str(&format!("id: {cursor}\nevent: board\ndata: {data}\n\n"));
                 }
-                HistoryEvent::Bookkeeping => {
+                HistoryEvent::Delivered(_) | HistoryEvent::Hidden => {
                     body.push_str(&format!("id: {cursor}\n\n"));
                 }
                 HistoryEvent::Unreadable => {
@@ -548,13 +645,17 @@ impl BoardHistory {
         Some((body, (first..last).collect()))
     }
 
-    fn events_page(&self, after: &str) -> Option<Value> {
+    fn events_page(&self, after: &str, with_bookkeeping: bool) -> Option<Value> {
         let first = self.position_after(after)?;
         let last = (first + EVENTS_PER_PAGE).min(self.events.len());
         let events: Vec<Value> = (first..last)
             .filter_map(|position| match &self.events[position] {
-                HistoryEvent::Delivered(delivered) => Some(Self::served_event(position, delivered)),
-                HistoryEvent::Bookkeeping | HistoryEvent::Unreadable => None,
+                HistoryEvent::Delivered(delivered) if delivered.is_shown(with_bookkeeping) => {
+                    Some(Self::served_event(position, delivered))
+                }
+                HistoryEvent::Delivered(_) | HistoryEvent::Hidden | HistoryEvent::Unreadable => {
+                    None
+                }
             })
             .collect();
         let cursor = if last > first {
@@ -640,7 +741,8 @@ impl HistoryResponder {
             .history
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some((body, positions)) = history.events_stream(&after) else {
+        let Some((body, positions)) = history.events_stream(&after, asks_for_bookkeeping(request))
+        else {
             return refused_cursor();
         };
         let caught_up = positions.is_empty();
@@ -687,7 +789,9 @@ impl Respond for HistoryResponder {
             "/api/board/threads" => history.threads_page(query.get("before").map(String::as_str)),
             "/api/board/channels" => history.channels_page(),
             "/api/board/actors" => history.actors_page(&asked_ids),
-            "/api/board/events" => match query.get("after").map(|after| history.events_page(after))
+            "/api/board/events" => match query
+                .get("after")
+                .map(|after| history.events_page(after, asks_for_bookkeeping(request)))
             {
                 Some(Some(page)) => page,
                 Some(None) => return refused_cursor(),
@@ -707,6 +811,13 @@ impl Respond for HistoryResponder {
         }
         response
     }
+}
+
+fn asks_for_bookkeeping(request: &Request) -> bool {
+    request
+        .url
+        .query_pairs()
+        .any(|(key, value)| key == "all" && value == "true")
 }
 
 pub fn asked_actor_ids(request: &Request) -> Vec<String> {
