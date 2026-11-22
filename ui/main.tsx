@@ -4,9 +4,12 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Application } from "./application";
 import type { Core } from "./core/client";
+import { createClock } from "./core/clock";
 import { createFakeCore } from "./core/fake";
 import { createStore } from "./core/store";
 import { createTauriCore } from "./core/tauri";
+
+const ONE_SECOND = 1000;
 
 function coreForThisWindow(): Core {
   if (isTauri()) {
@@ -27,6 +30,8 @@ const openBoardStore = createStore(core.subscribeToOpenBoard);
 const replicaStore = createStore(core.subscribeToReplica);
 const channelsStore = createStore(core.subscribeToChannels);
 const flowStore = createStore(core.subscribeToFlow);
+const tasksStore = createStore(core.subscribeToTasks);
+const clock = createClock(ONE_SECOND);
 
 createRoot(rootElement).render(
   <StrictMode>
@@ -35,9 +40,13 @@ createRoot(rootElement).render(
       replicaStore={replicaStore}
       channelsStore={channelsStore}
       flowStore={flowStore}
+      tasksStore={tasksStore}
+      clock={clock}
       readFlow={core.readFlow}
       readThread={core.readThread}
       openLink={core.openLink}
+      readTasks={core.readTasks}
+      readTaskCounts={core.readTaskCounts}
     />
   </StrictMode>,
 );

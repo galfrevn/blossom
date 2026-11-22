@@ -33,3 +33,15 @@ export type FoundChannel = { path: string, markedPath: Array<TextPart>, };
 export type FoundAgent = { id: string, markedName: Array<TextPart>, markedHandle: Array<TextPart>, };
 
 export type SearchResults = { messages: Array<FoundMessage>, tasks: Array<FoundTask>, channels: Array<FoundChannel>, agents: Array<FoundAgent>, };
+
+export type TaskNarrowing = { channel: string | null, state: string | null, title: string, };
+
+export type TaskRow = { id: string, state: string, title: string, channel: string, owner: string, holder: string | null, lease: Lease | null, changedAt: string, };
+
+export type Lease = { since: string | null, until: string, };
+
+export type TaskWindow = { total: number, start: number, rows: Array<TaskRow>, };
+
+export type TaskCount = { state: string, count: number, };
+
+export type TaskChange = { revision: number, };

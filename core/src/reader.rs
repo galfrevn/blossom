@@ -2,6 +2,7 @@ mod fleet;
 mod lines;
 mod numbers;
 mod search;
+mod tasks;
 mod thread;
 
 use std::cell::RefCell;
@@ -15,6 +16,7 @@ use crate::contract::{Agent, FlowFold, FlowRow, FlowWindow, SearchResults};
 use crate::replica::ReplicaError;
 use lines::{Line, OrderedMessage, lines_of};
 use numbers::Numbers;
+use tasks::TaskOrder;
 
 const MESSAGES_A_FOLD_SHOWS: usize = 8;
 
@@ -61,6 +63,7 @@ pub struct ReplicaReader {
     authors: Numbers,
     narrowed: RefCell<Option<Narrowed>>,
     last_arrival: i64,
+    tasks: TaskOrder,
 }
 
 impl ReplicaReader {
@@ -87,6 +90,7 @@ impl ReplicaReader {
                 flow.push(ordered_message(row, 0, &mut channels, &mut authors)?);
             }
         }
+        let tasks = TaskOrder::read(&snapshot)?;
         snapshot.commit()?;
         let lines = lines_of(&flow);
         Ok(ReplicaReader {
@@ -98,6 +102,7 @@ impl ReplicaReader {
             authors,
             narrowed: RefCell::new(None),
             last_arrival,
+            tasks,
         })
     }
 

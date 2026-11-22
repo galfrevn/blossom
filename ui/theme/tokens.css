@@ -18,6 +18,13 @@
     0.945 calc(var(--accent-chroma) * 0.28) var(--accent-hue)
   );
   --accent-line: oklch(0.83 calc(var(--accent-chroma) * 0.6) var(--accent-hue));
+  --state-ready: oklch(0.55 0.11 150);
+  --state-claimed: oklch(0.54 0.12 252);
+  --state-waiting: oklch(0.6 0.013 65);
+  --state-blocked: oklch(0.63 0.13 68);
+  --state-failed: oklch(0.55 0.17 30);
+  --state-completed: oklch(0.6 0.05 160);
+  --state-canceled: oklch(0.6 0.013 65);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -45,6 +52,13 @@
     --accent-line: oklch(
       0.42 calc(var(--accent-chroma) * 0.6) var(--accent-hue)
     );
+    --state-ready: oklch(0.76 0.12 150);
+    --state-claimed: oklch(0.75 0.11 252);
+    --state-waiting: oklch(0.57 0.012 75);
+    --state-blocked: oklch(0.8 0.12 75);
+    --state-failed: oklch(0.71 0.15 28);
+    --state-completed: oklch(0.68 0.05 160);
+    --state-canceled: oklch(0.57 0.012 75);
   }
 }
 
@@ -66,4 +80,11 @@
     0.25 calc(var(--accent-chroma) * 0.35) var(--accent-hue)
   );
   --accent-line: oklch(0.42 calc(var(--accent-chroma) * 0.6) var(--accent-hue));
+  --state-ready: oklch(0.76 0.12 150);
+  --state-claimed: oklch(0.75 0.11 252);
+  --state-waiting: oklch(0.57 0.012 75);
+  --state-blocked: oklch(0.8 0.12 75);
+  --state-failed: oklch(0.71 0.15 28);
+  --state-completed: oklch(0.68 0.05 160);
+  --state-canceled: oklch(0.57 0.012 75);
 }

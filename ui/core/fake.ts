@@ -6,6 +6,10 @@ import type {
   OpenBoard,
   ReplicaState,
   SearchResults,
+  TaskChange,
+  TaskCount,
+  TaskNarrowing,
+  TaskRow,
   Thread,
 } from "./contract";
 
@@ -49,6 +53,66 @@ function noSearchResults(): SearchResults {
   return { messages: [], tasks: [], channels: [], agents: [] };
 }
 
+function isNarrowedTo(row: TaskRow, narrowing: TaskNarrowing): boolean {
+  const title = narrowing.title.trim().toLowerCase();
+  const inTheChannel = isWithin(row.channel, narrowing.channel);
+  const inTheState = narrowing.state === null || row.state === narrowing.state;
+  const titled = row.title.toLowerCase().includes(title);
+  return inTheChannel && inTheState && titled;
+}
+
+function countsOfEachState(rows: TaskRow[]): TaskCount[] {
+  const counts: TaskCount[] = [];
+  for (const row of rows) {
+    const counted = counts.find((count) => count.state === row.state);
+    if (counted === undefined) {
+      counts.push({ state: row.state, count: 1 });
+    } else {
+      counted.count += 1;
+    }
+  }
+  return counts;
+}
+
+function createFakeTasks() {
+  const tasks = createFakeSubscription<TaskChange>();
+  let taskRows: TaskRow[] = [];
+  let taskRevision = 0;
+  return {
+    subscribeToTasks: tasks.subscribe,
+    readTasks: (narrowing: TaskNarrowing, start: number, count: number) => {
+      const narrowed = taskRows.filter((row) => isNarrowedTo(row, narrowing));
+      return Promise.resolve({
+        total: narrowed.length,
+        start,
+        rows: narrowed.slice(start, start + count),
+      });
+    },
+    readTaskCounts: (channel: string | null) => {
+      const inTheChannel = taskRows.filter((row) =>
+        isWithin(row.channel, channel),
+      );
+      return Promise.resolve(countsOfEachState(inTheChannel));
+    },
+    pushTasks: (rows: TaskRow[]) => {
+      taskRows = rows;
+      taskRevision += 1;
+      tasks.push({ revision: taskRevision });
+    },
+  };
+}
+
+function createFakeLinks() {
+  const linksOpened: string[] = [];
+  return {
+    openLink: (link: string) => {
+      linksOpened.push(link);
+      return Promise.resolve();
+    },
+    linksOpened: () => [...linksOpened],
+  };
+}
+
 export type FakeCore = {
   core: Core;
   pushOpenBoard: (openBoard: OpenBoard) => void;
@@ -59,6 +123,7 @@ export type FakeCore = {
   pushFleet: (agents: Agent[]) => void;
   answerSearch: (query: string, results: SearchResults) => void;
   linksOpened: () => string[];
+  pushTasks: (rows: TaskRow[]) => void;
 };
 
 export function createFakeCore(): FakeCore {
@@ -67,6 +132,8 @@ export function createFakeCore(): FakeCore {
   const channels = createFakeSubscription<string[]>();
   const flow = createFakeSubscription<FlowChange>();
   const fleet = createFakeSubscription<Agent[]>();
+  const { pushTasks, ...tasks } = createFakeTasks();
+  const { linksOpened, ...links } = createFakeLinks();
   let flowRows: FlowRow[] = [];
   let threads: Thread[] = [];
   let flowRevision = 0;
@@ -75,7 +142,6 @@ export function createFakeCore(): FakeCore {
     flow.push({ revision: flowRevision });
   };
   const searchAnswers = new Map<string, SearchResults>();
-  const linksOpened: string[] = [];
   return {
     core: {
       subscribeToOpenBoard: openBoard.subscribe,
@@ -97,10 +163,8 @@ export function createFakeCore(): FakeCore {
         Promise.resolve(threadHolding(threads, messageId)),
       search: (query) =>
         Promise.resolve(searchAnswers.get(query) ?? noSearchResults()),
-      openLink: (link) => {
-        linksOpened.push(link);
-        return Promise.resolve();
-      },
+      ...links,
+      ...tasks,
     },
     pushOpenBoard: openBoard.push,
     pushReplicaState: replica.push,
@@ -117,6 +181,7 @@ export function createFakeCore(): FakeCore {
     answerSearch: (query, results) => {
       searchAnswers.set(query, results);
     },
-    linksOpened: () => [...linksOpened],
+    linksOpened,
+    pushTasks,
   };
 }

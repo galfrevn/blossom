@@ -148,6 +148,7 @@ impl MessageView {
         let keys: MessageViewKeys = serde_json::from_str(json)?;
         let author_actor = keys.author_actor();
         let plain_agent_reply = keys.is_a_plain_agent_reply();
+        let task = keys.task.map(|task| task.titled_by(keys.text.as_deref()));
         let author = match (keys.by, keys.author) {
             (Some(by), Some(details)) => Some(details.of_actor(by.actor)),
             _ => None,
@@ -159,7 +160,7 @@ impl MessageView {
             created_at: keys.created_at,
             version: keys.version,
             json: json.to_owned(),
-            task: keys.task,
+            task,
             author,
             re: keys.re,
             author_actor,
@@ -212,7 +213,7 @@ impl From<rusqlite::Error> for ReplicaError {
 
 const WAIT_FOR_ANOTHER_CONNECTION: Duration = Duration::from_secs(2);
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 const SCHEMA: &str = "
     CREATE TABLE messages (
@@ -257,6 +258,7 @@ const SCHEMA: &str = "
     CREATE TABLE tasks (
         id TEXT PRIMARY KEY,
         channel TEXT NOT NULL,
+        title TEXT NOT NULL,
         state TEXT NOT NULL,
         owner TEXT NOT NULL,
         made_as TEXT NOT NULL,
@@ -271,6 +273,18 @@ const SCHEMA: &str = "
         latest_event_at TEXT
     ) WITHOUT ROWID;
     CREATE INDEX tasks_by_claim ON tasks (claim_actor, claim_until);
+    CREATE TABLE task_changes (
+        sequence INTEGER PRIMARY KEY,
+        id TEXT NOT NULL
+    );
+    CREATE TRIGGER change_of_a_new_task AFTER INSERT ON tasks
+    BEGIN
+        INSERT INTO task_changes (id) VALUES (new.id);
+    END;
+    CREATE TRIGGER change_of_a_kept_task AFTER UPDATE ON tasks
+    BEGIN
+        INSERT INTO task_changes (id) VALUES (new.id);
+    END;
     CREATE TABLE task_events (
         position INTEGER PRIMARY KEY,
         cursor TEXT NOT NULL UNIQUE,

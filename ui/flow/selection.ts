@@ -1,27 +1,9 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { arrowStepOf, comesFromTheList } from "../core/arrows";
 import { recordTheScrollPosition } from "./scroll";
 import { type ListState, rangeOnScreen } from "./state";
 
 type ListElement = React.RefObject<HTMLDivElement | null>;
-
-const STEP_OF_EACH_ARROW = new Map([
-  ["ArrowUp", -1],
-  ["ArrowDown", 1],
-]);
-
-function stepOf(event: KeyboardEvent): number | undefined {
-  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
-    return undefined;
-  }
-  return STEP_OF_EACH_ARROW.get(event.key);
-}
-
-function comesFromTheList(event: KeyboardEvent, scroller: HTMLElement) {
-  if (event.target === document.body) {
-    return true;
-  }
-  return event.target instanceof Node && scroller.contains(event.target);
-}
 
 function messageClicked(event: MouseEvent): string | undefined {
   if (!(event.target instanceof Element)) {
@@ -132,7 +114,7 @@ export function useSelectionByArrows(
   }, [selectedMessage]);
   useEffect(() => {
     const moveTheSelection = (event: KeyboardEvent) => {
-      const step = stepOf(event);
+      const step = arrowStepOf(event);
       const element = scroller.current;
       if (step === undefined || element === null) {
         return;

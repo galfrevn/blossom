@@ -1,8 +1,8 @@
 import { useRef } from "react";
-import type { FlowChange, FlowWindow } from "../core/contract";
+import type { FlowChange, FlowRow, FlowWindow } from "../core/contract";
+import { Windows } from "../core/windows";
 import { RowHeights } from "./heights";
 import type { WatchedRows } from "./watch";
-import { FlowWindows } from "./windows";
 
 export const ESTIMATED_ROW_HEIGHT = 46;
 export const ROWS_IN_A_BLOCK = 100;
@@ -12,7 +12,7 @@ export const PIXELS_THAT_STILL_COUNT_AS_THE_BOTTOM = 2;
 
 export type ListState = {
   heights: RowHeights;
-  windows: FlowWindows;
+  windows: Windows<FlowRow>;
   revision: number;
   scrollTop: number;
   viewportHeight: number;
@@ -71,7 +71,7 @@ export function useListState(
   if (stateRef.current === null) {
     stateRef.current = {
       heights: new RowHeights(0, ESTIMATED_ROW_HEIGHT),
-      windows: new FlowWindows(readFlow, ROWS_IN_A_BLOCK, BLOCKS_KEPT, redraw),
+      windows: new Windows(readFlow, ROWS_IN_A_BLOCK, BLOCKS_KEPT, redraw),
       revision: -1,
       scrollTop: 0,
       viewportHeight: 0,

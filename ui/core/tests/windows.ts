@@ -1,6 +1,5 @@
 import { expect, test } from "vitest";
-import type { FlowRow, FlowWindow } from "../../core/contract";
-import { FlowWindows } from "../windows";
+import { type Window, Windows } from "../windows";
 
 const BOARD_SIZE = 1000;
 const ROWS_IN_A_BLOCK = 100;
@@ -12,31 +11,25 @@ const THIRD_BLOCK = ROWS_IN_A_BLOCK * TWO_BLOCKS;
 const A_FEW_ROWS = 10;
 const HALF_A_BLOCK = ROWS_IN_A_BLOCK / TWO_BLOCKS;
 
-function rowNumbered(index: number, text: string): FlowRow {
-  return {
-    id: String(index),
-    channel: "fleet/www",
-    author: "claude",
-    onBehalfOf: "ada",
-    createdAt: "2026-11-21T10:00:00.000Z",
-    text,
-    edited: false,
-    deleted: false,
-    firstOfItsMinute: false,
-    fold: null,
-  };
+type NumberedRow = {
+  id: string;
+  text: string;
+};
+
+function rowNumbered(index: number, text: string): NumberedRow {
+  return { id: String(index), text };
 }
 
 function boardThatSays(textNow: () => string) {
   const requests: number[] = [];
-  const read = (start: number, count: number): Promise<FlowWindow> => {
+  const read = (start: number, count: number): Promise<Window<NumberedRow>> => {
     requests.push(start);
     const last = Math.min(BOARD_SIZE, start + count);
-    const rows: FlowRow[] = [];
+    const rows: NumberedRow[] = [];
     for (let index = start; index < last; index += 1) {
       rows.push(rowNumbered(index, textNow()));
     }
-    return Promise.resolve({ total: BOARD_SIZE, start, rows });
+    return Promise.resolve({ total: BOARD_SIZE, rows });
   };
   return { read, requests };
 }
@@ -46,7 +39,7 @@ const nothing = () => undefined;
 
 test("the rows near the screen are read a block at a time, once", async () => {
   const board = boardThatSays(() => "work");
-  const windows = new FlowWindows(
+  const windows = new Windows(
     board.read,
     ROWS_IN_A_BLOCK,
     ENOUGH_BLOCKS,
@@ -66,7 +59,7 @@ test("the rows near the screen are read a block at a time, once", async () => {
 test("it tells the list when a block arrives", async () => {
   const board = boardThatSays(() => "work");
   let arrivals = 0;
-  const windows = new FlowWindows(
+  const windows = new Windows(
     board.read,
     ROWS_IN_A_BLOCK,
     ENOUGH_BLOCKS,
@@ -83,12 +76,7 @@ test("it tells the list when a block arrives", async () => {
 
 test("only the blocks needed most recently are kept", async () => {
   const board = boardThatSays(() => "work");
-  const windows = new FlowWindows(
-    board.read,
-    ROWS_IN_A_BLOCK,
-    TWO_BLOCKS,
-    nothing,
-  );
+  const windows = new Windows(board.read, ROWS_IN_A_BLOCK, TWO_BLOCKS, nothing);
 
   windows.need(FIRST_BLOCK, FIRST_BLOCK + A_FEW_ROWS);
   windows.need(SECOND_BLOCK, SECOND_BLOCK + A_FEW_ROWS);
@@ -107,7 +95,7 @@ test("only the blocks needed most recently are kept", async () => {
 test("after a change on the board, the blocks in view are read again and shown until then", async () => {
   let textNow = "before";
   const board = boardThatSays(() => textNow);
-  const windows = new FlowWindows(
+  const windows = new Windows(
     board.read,
     ROWS_IN_A_BLOCK,
     ENOUGH_BLOCKS,

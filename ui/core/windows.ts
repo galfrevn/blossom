@@ -1,22 +1,25 @@
-import type { FlowRow, FlowWindow } from "../core/contract";
-
-type Block = {
-  rows: FlowRow[];
+type Block<Row> = {
+  rows: Row[];
   generation: number;
 };
 
-export class FlowWindows {
-  private readonly read: (start: number, count: number) => Promise<FlowWindow>;
+export type Window<Row> = {
+  total: number;
+  rows: Row[];
+};
+
+export class Windows<Row> {
+  private readonly read: (start: number, count: number) => Promise<Window<Row>>;
   private readonly blockSize: number;
   private readonly blocksKept: number;
   private readonly onArrival: () => void;
-  private readonly blocks = new Map<number, Block>();
+  private readonly blocks = new Map<number, Block<Row>>();
   private readonly requested = new Map<number, number>();
   private generation = 0;
   private knownTotal: number | undefined;
 
   constructor(
-    read: (start: number, count: number) => Promise<FlowWindow>,
+    read: (start: number, count: number) => Promise<Window<Row>>,
     blockSize: number,
     blocksKept: number,
     onArrival: () => void,
@@ -27,7 +30,7 @@ export class FlowWindows {
     this.onArrival = onArrival;
   }
 
-  rowAt(index: number): FlowRow | undefined {
+  rowAt(index: number): Row | undefined {
     const block = Math.floor(index / this.blockSize);
     return this.blocks.get(block)?.rows[index - block * this.blockSize];
   }
@@ -71,7 +74,7 @@ export class FlowWindows {
       },
       (error: unknown) => {
         this.requested.delete(block);
-        console.error("blossom: a window of Flow could not be read", error);
+        console.error("blossom: a window of rows could not be read", error);
       },
     );
   }

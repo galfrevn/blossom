@@ -1,53 +1,119 @@
-import { useCallback, useState } from "react";
+import type { Clock } from "./core/clock";
 import type {
   FlowChange,
   FlowWindow,
   OpenBoard,
   ReplicaState,
+  TaskChange,
+  TaskCount,
   Thread,
 } from "./core/contract";
 import { type Store, useStore } from "./core/store";
 import { FlowLens } from "./flow/lens";
+import { type Lens, useChoice } from "./frame/choice";
 import { Sidebar } from "./frame/sidebar";
 import { StatusBar } from "./frame/status";
 import { TitleBar } from "./frame/title";
 import { StartScreen } from "./start";
+import { TasksLens } from "./tasks/lens";
+import type { ReadTasks } from "./tasks/rows";
+
+type ReadFlow = (
+  channel: string | null,
+  start: number,
+  count: number,
+) => Promise<FlowWindow>;
+
+type ReadThread = (messageId: string) => Promise<Thread | null>;
+
+type OpenLink = (link: string) => Promise<void>;
+
+function ChosenLens({
+  lens,
+  channel,
+  boardUrl,
+  flowChange,
+  taskChange,
+  clock,
+  onWiden,
+  readFlow,
+  readThread,
+  openLink,
+  readTasks,
+  readTaskCounts,
+}: {
+  lens: Lens;
+  channel: string | null;
+  boardUrl: string;
+  flowChange: FlowChange | undefined;
+  taskChange: TaskChange | undefined;
+  clock: Clock;
+  onWiden: () => void;
+  readFlow: ReadFlow;
+  readThread: ReadThread;
+  openLink: OpenLink;
+  readTasks: ReadTasks;
+  readTaskCounts: (channel: string | null) => Promise<TaskCount[]>;
+}) {
+  if (lens === "tasks") {
+    return (
+      <TasksLens
+        change={taskChange}
+        flowChange={flowChange}
+        channel={channel}
+        clock={clock}
+        onWiden={onWiden}
+        readTasks={readTasks}
+        readTaskCounts={readTaskCounts}
+        readThread={readThread}
+        openLink={openLink}
+      />
+    );
+  }
+  return (
+    <FlowLens
+      change={flowChange}
+      channel={channel}
+      boardUrl={boardUrl}
+      onWiden={onWiden}
+      readFlow={readFlow}
+      readThread={readThread}
+      openLink={openLink}
+    />
+  );
+}
 
 export function Application({
   openBoardStore,
   replicaStore,
   channelsStore,
   flowStore,
+  tasksStore,
+  clock,
   readFlow,
   readThread,
   openLink,
+  readTasks,
+  readTaskCounts,
 }: {
   openBoardStore: Store<OpenBoard>;
   replicaStore: Store<ReplicaState>;
   channelsStore: Store<string[]>;
   flowStore: Store<FlowChange>;
-  readFlow: (
-    channel: string | null,
-    start: number,
-    count: number,
-  ) => Promise<FlowWindow>;
-  readThread: (messageId: string) => Promise<Thread | null>;
-  openLink: (link: string) => Promise<void>;
+  tasksStore: Store<TaskChange>;
+  clock: Clock;
+  readFlow: ReadFlow;
+  readThread: ReadThread;
+  openLink: OpenLink;
+  readTasks: ReadTasks;
+  readTaskCounts: (channel: string | null) => Promise<TaskCount[]>;
 }) {
   const openBoard = useStore(openBoardStore);
   const replicaState = useStore(replicaStore);
   const channels = useStore(channelsStore);
   const flowChange = useStore(flowStore);
-  const [chosenChannel, setChosenChannel] = useState<string | null>(null);
-  const chooseChannel = useCallback((channel: string) => {
-    setChosenChannel((current) => {
-      if (current === channel) {
-        return null;
-      }
-      return channel;
-    });
-  }, []);
-  const showTheWholeBoard = useCallback(() => setChosenChannel(null), []);
+  const taskChange = useStore(tasksStore);
+  const { choice, chooseLens, chooseChannel, widen } = useChoice();
   return (
     <div className="flex h-screen flex-col bg-paper text-ink">
       <TitleBar />
@@ -60,18 +126,24 @@ export function Application({
         <div className="flex min-h-0 flex-1">
           <Sidebar
             channels={channels ?? []}
-            chosenChannel={chosenChannel}
+            chosenChannel={choice.channel}
+            chosenLens={choice.lens}
             onChooseChannel={chooseChannel}
-            onChooseFlow={showTheWholeBoard}
+            onChooseLens={chooseLens}
           />
-          <FlowLens
-            change={flowChange}
-            channel={chosenChannel}
+          <ChosenLens
+            lens={choice.lens}
+            channel={choice.channel}
             boardUrl={openBoard.url}
-            onWiden={showTheWholeBoard}
+            flowChange={flowChange}
+            taskChange={taskChange}
+            clock={clock}
+            onWiden={widen}
             readFlow={readFlow}
             readThread={readThread}
             openLink={openLink}
+            readTasks={readTasks}
+            readTaskCounts={readTaskCounts}
           />
         </div>
       )}

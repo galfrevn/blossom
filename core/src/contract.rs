@@ -1,5 +1,9 @@
+mod tasks;
+
 use serde::Serialize;
 use ts_rs::{Config, TS};
+
+pub use tasks::{Lease, TaskChange, TaskCount, TaskNarrowing, TaskRow, TaskWindow};
 
 pub fn typescript() -> String {
     let configuration = Config::new();
@@ -22,6 +26,12 @@ pub fn typescript() -> String {
         FoundChannel::decl(&configuration),
         FoundAgent::decl(&configuration),
         SearchResults::decl(&configuration),
+        TaskNarrowing::decl(&configuration),
+        TaskRow::decl(&configuration),
+        Lease::decl(&configuration),
+        TaskWindow::decl(&configuration),
+        TaskCount::decl(&configuration),
+        TaskChange::decl(&configuration),
     ];
     declarations
         .iter()

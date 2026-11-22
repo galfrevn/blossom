@@ -5,6 +5,10 @@ import type {
   OpenBoard,
   ReplicaState,
   SearchResults,
+  TaskChange,
+  TaskCount,
+  TaskNarrowing,
+  TaskWindow,
   Thread,
 } from "./contract";
 
@@ -26,4 +30,11 @@ export type Core = {
   readThread: (messageId: string) => Promise<Thread | null>;
   search: (query: string) => Promise<SearchResults>;
   openLink: (link: string) => Promise<void>;
+  subscribeToTasks: (listener: (change: TaskChange) => void) => () => void;
+  readTasks: (
+    narrowing: TaskNarrowing,
+    start: number,
+    count: number,
+  ) => Promise<TaskWindow>;
+  readTaskCounts: (channel: string | null) => Promise<TaskCount[]>;
 };

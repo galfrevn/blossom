@@ -1,6 +1,7 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { Application } from "../application";
+import { createClock } from "../core/clock";
 import type {
   FlowRow,
   OpenBoard,
@@ -12,6 +13,8 @@ import { createStore } from "../core/store";
 import { dictionary } from "../dictionary";
 
 afterEach(cleanup);
+
+const ONE_SECOND = 1000;
 
 const boardOfAda: OpenBoard = {
   kind: "open",
@@ -31,6 +34,7 @@ function renderApplicationWhileTheCoreSays(said: {
   const replicaStore = createStore(fakeCore.core.subscribeToReplica);
   const channelsStore = createStore(fakeCore.core.subscribeToChannels);
   const flowStore = createStore(fakeCore.core.subscribeToFlow);
+  const tasksStore = createStore(fakeCore.core.subscribeToTasks);
   if (said.openBoard !== undefined) {
     fakeCore.pushOpenBoard(said.openBoard);
   }
@@ -52,9 +56,13 @@ function renderApplicationWhileTheCoreSays(said: {
       replicaStore={replicaStore}
       channelsStore={channelsStore}
       flowStore={flowStore}
+      tasksStore={tasksStore}
+      clock={createClock(ONE_SECOND)}
       readFlow={fakeCore.core.readFlow}
       readThread={fakeCore.core.readThread}
       openLink={fakeCore.core.openLink}
+      readTasks={fakeCore.core.readTasks}
+      readTaskCounts={fakeCore.core.readTaskCounts}
     />,
   );
   return fakeCore;
@@ -265,4 +273,25 @@ test("selecting a line in Flow opens its thread in the pane, beside the lens", a
   });
   expect(await within(pane).findByText("deploy www")).toBeDefined();
   expect(within(pane).getByText("deploy failed")).toBeDefined();
+});
+
+test("choosing a lens in the sidebar shows it, still narrowed to the chosen channel", () => {
+  renderApplicationWhileTheCoreSays({
+    openBoard: boardOfAda,
+    channels: ["fleet/www"],
+  });
+
+  act(() => {
+    screen.getByRole("button", { name: "#www" }).click();
+  });
+  act(() => {
+    screen.getByRole("button", { name: dictionary.lenses.tasks.title }).click();
+  });
+
+  expect(
+    screen.getByRole("heading", { name: dictionary.lenses.tasks.title }),
+  ).toBeDefined();
+  expect(
+    screen.getByText(dictionary.lenses.narrowedTo("fleet/www")),
+  ).toBeDefined();
 });

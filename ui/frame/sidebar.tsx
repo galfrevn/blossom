@@ -1,5 +1,6 @@
-import { useCallback, useId } from "react";
+import { useCallback, useEffect, useId } from "react";
 import { dictionary } from "../dictionary";
+import type { Lens } from "./choice";
 
 const INDENT_FOR_EACH_DEPTH = [
   "pl-2",
@@ -69,16 +70,79 @@ function indentOf(depth: number): string {
   return INDENT_FOR_EACH_DEPTH[Math.min(depth, DEEPEST_INDENT)] ?? "pl-2";
 }
 
+const LENS_ICON =
+  "size-[14px] flex-none fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:1.3]";
+
 function FlowIcon() {
   return (
-    <svg
-      viewBox="0 0 14 14"
-      aria-hidden={true}
-      className="size-[14px] flex-none fill-none stroke-current [stroke-linecap:round] [stroke-width:1.3]"
-    >
+    <svg viewBox="0 0 14 14" aria-hidden={true} className={LENS_ICON}>
       <path d="M1.5 3.5h11M1.5 7h8M1.5 10.5h10" />
     </svg>
   );
+}
+
+function TasksIcon() {
+  return (
+    <svg viewBox="0 0 14 14" aria-hidden={true} className={LENS_ICON}>
+      <rect x="1.5" y="1.5" width="11" height="11" rx="1" />
+      <path d="M4 5h6M4 7.5h6M4 10h3" />
+    </svg>
+  );
+}
+
+type LensEntry = {
+  lens: Lens;
+  name: string;
+  key: string;
+  icon: () => React.ReactNode;
+};
+
+const LENS_ENTRIES: LensEntry[] = [
+  {
+    lens: "flow",
+    name: dictionary.lenses.flow.title,
+    key: "2",
+    icon: FlowIcon,
+  },
+  {
+    lens: "tasks",
+    name: dictionary.lenses.tasks.title,
+    key: "3",
+    icon: TasksIcon,
+  },
+];
+
+function isTypingInto(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  const takesText =
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement;
+  return takesText || target.isContentEditable;
+}
+
+function useLensKeys(onChooseLens: (lens: Lens) => void) {
+  useEffect(() => {
+    const chooseTheLensOfTheKey = (event: KeyboardEvent) => {
+      const pressedWithModifiers =
+        event.metaKey || event.ctrlKey || event.altKey || event.shiftKey;
+      if (pressedWithModifiers || isTypingInto(event.target)) {
+        return;
+      }
+      const entry = LENS_ENTRIES.find(
+        (candidate) => candidate.key === event.key,
+      );
+      if (entry !== undefined) {
+        onChooseLens(entry.lens);
+      }
+    };
+    document.addEventListener("keydown", chooseTheLensOfTheKey);
+    return () => {
+      document.removeEventListener("keydown", chooseTheLensOfTheKey);
+    };
+  }, [onChooseLens]);
 }
 
 function Heading({ id, children }: { id: string; children: string }) {
@@ -99,8 +163,8 @@ function currentnessOf(isCurrent: boolean): "true" | "false" {
   return "false";
 }
 
-function lensCurrentnessOf(chosenChannel: string | null): "page" | "false" {
-  if (chosenChannel === null) {
+function lensCurrentnessOf(isChosen: boolean): "page" | "false" {
+  if (isChosen) {
     return "page";
   }
   return "false";
@@ -131,38 +195,69 @@ function ChannelButton({
   );
 }
 
+function LensButton({
+  entry,
+  isChosen,
+  onChoose,
+}: {
+  entry: LensEntry;
+  isChosen: boolean;
+  onChoose: (lens: Lens) => void;
+}) {
+  const choose = useCallback(
+    () => onChoose(entry.lens),
+    [onChoose, entry.lens],
+  );
+  const Icon = entry.icon;
+  return (
+    <button
+      type="button"
+      aria-label={entry.name}
+      aria-current={lensCurrentnessOf(isChosen)}
+      aria-keyshortcuts={entry.key}
+      onClick={choose}
+      className={`${NAVIGATION_ROW} pl-2`}
+    >
+      <Icon />
+      <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+      <kbd className="min-w-4 rounded-[3px] border border-line bg-raised px-1 py-0.5 text-center font-mono text-[10px] text-ink-3 leading-none">
+        {entry.key}
+      </kbd>
+    </button>
+  );
+}
+
 export function Sidebar({
   channels,
   chosenChannel,
+  chosenLens,
   onChooseChannel,
-  onChooseFlow,
+  onChooseLens,
 }: {
   channels: string[];
   chosenChannel: string | null;
+  chosenLens: Lens;
   onChooseChannel: (channel: string) => void;
-  onChooseFlow: () => void;
+  onChooseLens: (lens: Lens) => void;
 }) {
   const text = dictionary.sidebar;
   const lensesHeading = useId();
   const channelsHeading = useId();
+  useLensKeys(onChooseLens);
   return (
     <aside className="flex w-[212px] shrink-0 flex-col gap-3.5 overflow-auto border-line border-r bg-surface px-1.5 pt-2 pb-6">
       <section>
         <Heading id={lensesHeading}>{text.lenses}</Heading>
         <ul aria-labelledby={lensesHeading} className="flex flex-col gap-px">
-          <li>
-            <button
-              type="button"
-              aria-current={lensCurrentnessOf(chosenChannel)}
-              onClick={onChooseFlow}
-              className={`${NAVIGATION_ROW} pl-2`}
-            >
-              <FlowIcon />
-              <span className="min-w-0 flex-1 truncate">
-                {dictionary.lenses.flow.title}
-              </span>
-            </button>
-          </li>
+          {LENS_ENTRIES.map((entry) => (
+            <li key={entry.lens}>
+              <LensButton
+                entry={entry}
+                isChosen={entry.lens === chosenLens}
+                onChoose={onChooseLens}
+              />
+            </li>
+          ))}
         </ul>
       </section>
       <section>

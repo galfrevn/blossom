@@ -7,6 +7,9 @@ import type {
   OpenBoard,
   ReplicaState,
   SearchResults,
+  TaskChange,
+  TaskCount,
+  TaskWindow,
   Thread,
 } from "./contract";
 
@@ -47,5 +50,11 @@ export function createTauriCore(): Core {
       invoke<Thread | null>("read_thread", { messageId }),
     search: (query) => invoke<SearchResults>("search", { query }),
     openLink: (link) => invoke<void>("open_link", { link }),
+    subscribeToTasks: (listener) =>
+      subscribeOverChannel<TaskChange>("subscribe_to_tasks", listener),
+    readTasks: (narrowing, start, count) =>
+      invoke<TaskWindow>("read_tasks", { narrowing, start, count }),
+    readTaskCounts: (channel) =>
+      invoke<TaskCount[]>("read_task_counts", { channel }),
   };
 }

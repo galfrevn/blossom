@@ -63,9 +63,22 @@ pub(crate) struct RootTask {
     blocked: Option<Hold>,
     result: Option<String>,
     reason: Option<String>,
+    #[serde(skip)]
+    title: String,
 }
 
 impl RootTask {
+    pub(crate) fn titled_by(self, root_text: Option<&str>) -> RootTask {
+        let first_line = root_text
+            .and_then(|text| text.lines().next())
+            .unwrap_or_default()
+            .trim();
+        RootTask {
+            title: first_line.to_owned(),
+            ..self
+        }
+    }
+
     pub(crate) fn actor_ids(&self) -> impl Iterator<Item = &str> {
         let claim_actor = self.claim.as_ref().map(|claim| claim.actor.as_str());
         [
@@ -153,14 +166,15 @@ pub(super) fn keep_root_task(
     let mut keep_newest_task = transaction.prepare_cached(
         "INSERT INTO tasks (
              id, channel, state, owner, made_as, assigned_to, claim_actor, claim_until, needs,
-             blocked_kind, blocked_reason, result, reason, latest_event_at
+             blocked_kind, blocked_reason, result, reason, title, latest_event_at
          )
          VALUES (
-             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
              (SELECT max(created_at) FROM task_events WHERE task = ?1)
          )
          ON CONFLICT (id) DO UPDATE SET
              channel = excluded.channel,
+             title = excluded.title,
              state = excluded.state,
              owner = excluded.owner,
              made_as = excluded.made_as,
@@ -190,7 +204,8 @@ pub(super) fn keep_root_task(
         blocked_kind,
         blocked_reason,
         task.result,
-        task.reason
+        task.reason,
+        task.title
     ])?;
     Ok(())
 }

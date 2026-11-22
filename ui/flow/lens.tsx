@@ -2,35 +2,8 @@ import { useCallback, useState } from "react";
 import type { FlowChange, FlowWindow, Thread } from "../core/contract";
 import { dictionary } from "../dictionary";
 import { LensHeader } from "../frame/lens";
-import { ThreadPane } from "../thread/pane";
+import { OpenThread } from "../thread/open";
 import { FlowList } from "./list";
-
-function OpenThread({
-  messageId,
-  change,
-  readThread,
-  openLink,
-  onClose,
-}: {
-  messageId: string | undefined;
-  change: FlowChange | undefined;
-  readThread: (messageId: string) => Promise<Thread | null>;
-  openLink: (link: string) => Promise<void>;
-  onClose: () => void;
-}) {
-  if (messageId === undefined) {
-    return null;
-  }
-  return (
-    <ThreadPane
-      messageId={messageId}
-      change={change}
-      readThread={readThread}
-      openLink={openLink}
-      onClose={onClose}
-    />
-  );
-}
 
 export function FlowLens({
   change,

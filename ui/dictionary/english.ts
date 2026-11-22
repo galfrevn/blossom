@@ -9,6 +9,37 @@ function count(value: number): string {
   return countFormat.format(value);
 }
 
+const SECONDS_IN_A_MINUTE = 60;
+const SECONDS_IN_AN_HOUR = 3600;
+const SECONDS_IN_A_DAY = 86_400;
+const DIGITS_OF_A_PADDED_NUMBER = 2;
+
+function padded(value: number): string {
+  return String(value).padStart(DIGITS_OF_A_PADDED_NUMBER, "0");
+}
+
+function timeSince(seconds: number): string {
+  if (seconds < SECONDS_IN_A_MINUTE) {
+    return `${seconds} s`;
+  }
+  if (seconds < SECONDS_IN_AN_HOUR) {
+    return `${Math.floor(seconds / SECONDS_IN_A_MINUTE)} min`;
+  }
+  if (seconds < SECONDS_IN_A_DAY) {
+    const hours = Math.floor(seconds / SECONDS_IN_AN_HOUR);
+    const minutes = Math.floor(
+      (seconds % SECONDS_IN_AN_HOUR) / SECONDS_IN_A_MINUTE,
+    );
+    return `${hours} h ${padded(minutes)} min`;
+  }
+  return `${count(Math.floor(seconds / SECONDS_IN_A_DAY))} d`;
+}
+
+function timeLeft(seconds: number): string {
+  const minutes = Math.floor(seconds / SECONDS_IN_A_MINUTE);
+  return `${minutes}:${padded(seconds % SECONDS_IN_A_MINUTE)}`;
+}
+
 function plural(value: number, one: string, many: string): string {
   if (value === 1) {
     return `1 ${one}`;
@@ -46,6 +77,11 @@ export const english = {
       description:
         "Everything on the board, in order. Repeated progress folds into one line per channel; open a line to read it.",
     },
+    tasks: {
+      title: "Tasks",
+      description:
+        "Every task on the board, open ones first. Choose a state to see only its tasks, or filter them by title; open a row to read its thread.",
+    },
   },
   flow: {
     onBehalfOf: (person: string) => `via ${person}`,
@@ -69,6 +105,36 @@ export const english = {
       }
       return `${count(waiting)} new messages`;
     },
+  },
+  tasks: {
+    list: "Tasks",
+    states: "States",
+    stateNames: {
+      blocked: "Blocked",
+      failed: "Failed",
+      claimed: "Claimed",
+      ready: "Ready",
+      waiting: "Waiting",
+      completed: "Completed",
+      canceled: "Canceled",
+    },
+    columns: {
+      state: "State",
+      task: "Task",
+      channel: "Channel",
+      owner: "Owner",
+      heldBy: "Held by",
+      updated: "Updated",
+    },
+    count,
+    channel: (channel: string) => `#${channel}`,
+    filter: "Filter by title",
+    timeSince,
+    timeLeft,
+    leaseLeft: "Lease left",
+    lapsed: "lapsed",
+    noTasks: "No tasks on this board yet",
+    noneMatch: "No task matches",
   },
   thread: {
     title: "Thread",
