@@ -214,7 +214,7 @@ impl From<rusqlite::Error> for ReplicaError {
 
 const WAIT_FOR_ANOTHER_CONNECTION: Duration = Duration::from_secs(2);
 
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 const SCHEMA: &str = "
     CREATE TABLE messages (
@@ -285,6 +285,27 @@ const SCHEMA: &str = "
     CREATE TRIGGER change_of_a_kept_task AFTER UPDATE ON tasks
     BEGIN
         INSERT INTO task_changes (id) VALUES (new.id);
+    END;
+    CREATE TABLE message_changes (
+        sequence INTEGER PRIMARY KEY,
+        id TEXT NOT NULL
+    );
+    CREATE TRIGGER change_of_a_stored_message
+    AFTER UPDATE OF channel, re, author, plain_agent_reply ON messages
+    WHEN old.channel IS NOT new.channel
+        OR old.re IS NOT new.re
+        OR old.author IS NOT new.author
+        OR old.plain_agent_reply IS NOT new.plain_agent_reply
+    BEGIN
+        INSERT INTO message_changes (id) VALUES (new.id);
+    END;
+    CREATE TRIGGER change_of_the_replies_to_a_new_task AFTER INSERT ON tasks
+    BEGIN
+        INSERT INTO message_changes (id)
+        SELECT replies.id
+        FROM messages AS root
+        JOIN messages AS replies ON replies.thread = root.thread
+        WHERE root.id = new.id AND replies.re = new.id;
     END;
     CREATE TABLE task_events (
         position INTEGER PRIMARY KEY,

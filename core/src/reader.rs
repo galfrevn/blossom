@@ -14,7 +14,7 @@ use rusqlite::{CachedStatement, Connection, OpenFlags, Row, params};
 
 use crate::contract::{Agent, FlowFold, FlowRow, FlowWindow, SearchResults};
 use crate::replica::ReplicaError;
-use lines::{Line, OrderedMessage, lines_of, place_in_order};
+use lines::{Line, OrderedMessage, lines_of, place_in_order, take_in_changes};
 use numbers::Numbers;
 use tasks::TaskOrder;
 
@@ -54,6 +54,46 @@ fn ordered_message(
     })
 }
 
+fn last_in(connection: &Connection, log: &str) -> rusqlite::Result<i64> {
+    connection.query_row(
+        &format!("SELECT coalesce(max(sequence), 0) FROM {log}"),
+        [],
+        |row| row.get(0),
+    )
+}
+
+struct LoggedSince {
+    messages: Vec<OrderedMessage>,
+    last: i64,
+}
+
+fn messages_logged_since(
+    connection: &Connection,
+    log: &str,
+    last: i64,
+    channels: &mut Numbers,
+    authors: &mut Numbers,
+) -> rusqlite::Result<LoggedSince> {
+    let mut statement = connection.prepare_cached(&format!(
+        "SELECT {log}.sequence, {ORDERED_MESSAGE_COLUMNS}
+         FROM {log} JOIN messages ON messages.id = {log}.id
+         WHERE {log}.sequence > ?1
+         ORDER BY {log}.sequence"
+    ))?;
+    let mut logged = LoggedSince {
+        messages: Vec::new(),
+        last,
+    };
+    let mut rows = statement.query(params![last])?;
+    while let Some(row) = rows.next()? {
+        logged.last = row.get(0)?;
+        logged
+            .messages
+            .push(ordered_message(row, 1, channels, authors)?);
+    }
+    Ok(logged)
+}
+
 pub struct ReplicaReader {
     connection: Connection,
     flow: Vec<OrderedMessage>,
@@ -63,6 +103,7 @@ pub struct ReplicaReader {
     authors: Numbers,
     narrowed: RefCell<Option<Narrowed>>,
     last_arrival: i64,
+    last_message_change: i64,
     tasks: TaskOrder,
 }
 
@@ -73,11 +114,8 @@ impl ReplicaReader {
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         let snapshot = connection.unchecked_transaction()?;
-        let last_arrival: i64 = snapshot.query_row(
-            "SELECT coalesce(max(sequence), 0) FROM arrivals",
-            [],
-            |row| row.get(0),
-        )?;
+        let last_arrival = last_in(&snapshot, "arrivals")?;
+        let last_message_change = last_in(&snapshot, "message_changes")?;
         let mut channels = Numbers::default();
         let mut authors = Numbers::default();
         let mut flow = Vec::new();
@@ -102,6 +140,7 @@ impl ReplicaReader {
             authors,
             narrowed: RefCell::new(None),
             last_arrival,
+            last_message_change,
             tasks,
         })
     }
@@ -133,31 +172,30 @@ impl ReplicaReader {
     }
 
     pub fn catch_up(&mut self) -> Result<bool, ReplicaError> {
-        let mut arrived = Vec::new();
-        let mut last_arrival = self.last_arrival;
-        {
-            let mut statement = self.connection.prepare_cached(&format!(
-                "SELECT arrivals.sequence, {ORDERED_MESSAGE_COLUMNS}
-                 FROM arrivals JOIN messages ON messages.id = arrivals.id
-                 WHERE arrivals.sequence > ?1
-                 ORDER BY arrivals.sequence"
-            ))?;
-            let mut rows = statement.query(params![self.last_arrival])?;
-            while let Some(row) = rows.next()? {
-                last_arrival = row.get(0)?;
-                arrived.push(ordered_message(
-                    row,
-                    1,
-                    &mut self.channels,
-                    &mut self.authors,
-                )?);
-            }
-        }
-        if arrived.is_empty() {
+        let snapshot = self.connection.unchecked_transaction()?;
+        let arrived = messages_logged_since(
+            &snapshot,
+            "arrivals",
+            self.last_arrival,
+            &mut self.channels,
+            &mut self.authors,
+        )?;
+        let changed = messages_logged_since(
+            &snapshot,
+            "message_changes",
+            self.last_message_change,
+            &mut self.channels,
+            &mut self.authors,
+        )?;
+        snapshot.commit()?;
+        self.last_arrival = arrived.last;
+        self.last_message_change = changed.last;
+        let anything_arrived = !arrived.messages.is_empty();
+        place_in_order(&mut self.flow, arrived.messages);
+        let anything_moved = take_in_changes(&mut self.flow, changed.messages);
+        if !(anything_arrived || anything_moved) {
             return Ok(false);
         }
-        place_in_order(&mut self.flow, arrived);
-        self.last_arrival = last_arrival;
         self.lines = lines_of(&self.flow);
         self.revision = self.revision.wrapping_add(1);
         Ok(true)

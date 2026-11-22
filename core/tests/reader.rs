@@ -356,16 +356,42 @@ fn a_narrowed_flow_follows_new_messages_in_its_channel() {
     assert_eq!(reader.flow_window_in(None, 0, 10).unwrap().total, 3);
 }
 
-fn root_task_in(channel: &str, id: &str, second: u32) -> Result<MessageView, serde_json::Error> {
-    let board_view = json!({
+fn root_task_view(channel: &str, id: &str, second: u32, version: u32) -> serde_json::Value {
+    json!({
         "id": id, "channel": channel, "thread": format!("thread-of-{id}"), "re": null,
-        "createdAt": format!("2026-11-21T11:00:{second:02}.000Z"), "version": 1,
+        "createdAt": format!("2026-11-21T11:00:{second:02}.000Z"), "version": version,
         "text": "fix the flaky test",
         "author": { "kind": "person", "handle": "ada", "name": "Ada Lovelace" },
         "task": {
             "state": "claimed", "owner": "local:user:ada", "by": "local:user:ada", "for": null,
             "needs": [], "epoch": 1, "claim": null, "blocked": null, "result": null, "reason": null
         }
+    })
+}
+
+fn root_task_in(channel: &str, id: &str, second: u32) -> Result<MessageView, serde_json::Error> {
+    MessageView::parse(&root_task_view(channel, id, second, 1).to_string())
+}
+
+fn root_made_a_task(
+    channel: &str,
+    id: &str,
+    second: u32,
+) -> Result<MessageView, serde_json::Error> {
+    MessageView::parse(&root_task_view(channel, id, second, 2).to_string())
+}
+
+fn agent_reply_edited(
+    id: &str,
+    root: &str,
+    second: u32,
+    text: &str,
+) -> Result<MessageView, serde_json::Error> {
+    let board_view = json!({
+        "id": id, "channel": "fleet/www", "thread": format!("thread-of-{root}"), "re": root,
+        "createdAt": format!("2026-11-21T11:00:{second:02}.000Z"), "version": 2,
+        "editedAt": "2026-11-21T11:05:00.000Z", "text": text, "attachments": [],
+        "author": { "kind": "agent", "handle": "ada/claude", "name": "claude", "via": { "name": "ada", "environment": null } }
     });
     MessageView::parse(&board_view.to_string())
 }
@@ -780,4 +806,159 @@ fn a_fold_that_grew_after_a_message_is_one_line_after_it() {
         reader.flow_lines_after_in(None, &fold.created_at, &fold.id),
         1
     );
+}
+
+#[test]
+fn a_thread_made_into_a_task_folds_the_progress_already_in_it_once_the_reader_catches_up() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            root_in("fleet/www", "10", 0).unwrap(),
+            progress("11", "10", "fleet/www", 1, "claude").unwrap(),
+            progress("12", "10", "fleet/www", 2, "codex").unwrap(),
+            progress("13", "10", "fleet/www", 3, "claude").unwrap(),
+        ]))
+        .unwrap();
+    let mut reader = ReplicaReader::open(&file).unwrap();
+    let before = shape_of(&reader.flow_window_in(None, 0, 10).unwrap());
+
+    replica
+        .apply(&Batch::from_views(vec![
+            root_made_a_task("fleet/www", "10", 0).unwrap(),
+        ]))
+        .unwrap();
+    let caught_up = reader.catch_up().unwrap();
+
+    assert_eq!(before, vec!["10", "11", "12", "13"]);
+    assert!(caught_up);
+    assert_eq!(
+        shape_of(&reader.flow_window_in(None, 0, 10).unwrap()),
+        vec!["10", "fold 3 of 2 in fleet/www"]
+    );
+    assert!(!reader.catch_up().unwrap());
+}
+
+#[test]
+fn progress_stored_before_its_task_folds_once_the_task_arrives() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            progress("11", "10", "fleet/www", 1, "claude").unwrap(),
+            progress("12", "10", "fleet/www", 2, "claude").unwrap(),
+        ]))
+        .unwrap();
+    let mut reader = ReplicaReader::open(&file).unwrap();
+
+    replica
+        .apply(&Batch::from_views(vec![
+            root_task_in("fleet/www", "10", 0).unwrap(),
+        ]))
+        .unwrap();
+    reader.catch_up().unwrap();
+
+    assert_eq!(
+        shape_of(&reader.flow_window_in(None, 0, 10).unwrap()),
+        vec!["10", "fold 2 of 1 in fleet/www"]
+    );
+}
+
+#[test]
+fn an_edit_that_adds_a_mention_takes_its_reply_out_of_the_fold() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            root_task_in("fleet/www", "10", 0).unwrap(),
+            progress("11", "10", "fleet/www", 1, "claude").unwrap(),
+            progress("12", "10", "fleet/www", 2, "claude").unwrap(),
+            progress("13", "10", "fleet/www", 3, "claude").unwrap(),
+        ]))
+        .unwrap();
+    let mut reader = ReplicaReader::open(&file).unwrap();
+
+    replica
+        .apply(&Batch::from_views(vec![
+            agent_reply_edited("12", "10", 2, "over to @[local:user:ada]").unwrap(),
+        ]))
+        .unwrap();
+    let caught_up = reader.catch_up().unwrap();
+
+    assert!(caught_up);
+    assert_eq!(
+        shape_of(&reader.flow_window_in(None, 0, 10).unwrap()),
+        vec![
+            "10",
+            "fold 1 of 1 in fleet/www",
+            "12",
+            "fold 1 of 1 in fleet/www"
+        ]
+    );
+}
+
+#[test]
+fn an_edit_that_removes_the_mention_brings_its_reply_back_into_the_fold() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            root_task_in("fleet/www", "10", 0).unwrap(),
+            progress("11", "10", "fleet/www", 1, "claude").unwrap(),
+            reply(&Reply {
+                id: "12",
+                root: "10",
+                channel: "fleet/www",
+                second: 2,
+                agent: "claude",
+                text: "over to @[local:user:ada]",
+            })
+            .unwrap(),
+            progress("13", "10", "fleet/www", 3, "claude").unwrap(),
+        ]))
+        .unwrap();
+    let mut reader = ReplicaReader::open(&file).unwrap();
+
+    replica
+        .apply(&Batch::from_views(vec![
+            agent_reply_edited("12", "10", 2, "still running the tests").unwrap(),
+        ]))
+        .unwrap();
+    reader.catch_up().unwrap();
+
+    assert_eq!(
+        shape_of(&reader.flow_window_in(None, 0, 10).unwrap()),
+        vec!["10", "fold 3 of 1 in fleet/www"]
+    );
+}
+
+#[test]
+fn an_edit_that_changes_none_of_a_message_s_facts_leaves_the_order_as_it_was() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            root_task_in("fleet/www", "10", 0).unwrap(),
+            progress("11", "10", "fleet/www", 1, "claude").unwrap(),
+        ]))
+        .unwrap();
+    let mut reader = ReplicaReader::open(&file).unwrap();
+
+    replica
+        .apply(&Batch::from_views(vec![
+            agent_reply_edited("11", "10", 1, "still running the tests, 3 left").unwrap(),
+        ]))
+        .unwrap();
+    let caught_up = reader.catch_up().unwrap();
+    let window = reader.flow_window_in(None, 0, 10).unwrap();
+
+    assert!(!caught_up);
+    assert_eq!(shape_of(&window), vec!["10", "fold 1 of 1 in fleet/www"]);
+    let fold = window.rows[1].fold.as_ref().unwrap();
+    assert_eq!(fold.recent[0].text, "still running the tests, 3 left");
 }
