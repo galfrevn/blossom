@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::replica::{Batch, Replica, ReplicaError};
+use crate::replica::{Batch, BoardIdentity, Replica, ReplicaError};
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -33,6 +33,20 @@ pub(crate) async fn store(
         }
         let stored = replica.message_count();
         Ok((replica, stored))
+    })
+    .await
+    .map_err(StorageError::Thread)?
+    .map_err(StorageError::Replica)
+}
+
+pub(crate) async fn finish_copy(
+    mut replica: Replica,
+    identity: Option<BoardIdentity>,
+    feed_cursor: String,
+) -> Result<Replica, StorageError> {
+    tokio::task::spawn_blocking(move || {
+        replica.finish_copy(identity.as_ref(), &feed_cursor)?;
+        Ok(replica)
     })
     .await
     .map_err(StorageError::Thread)?

@@ -123,6 +123,7 @@ export function FlowList({
   channel,
   boardUrl,
   readFlow,
+  countFlowAfter,
   selectedMessage,
   onSelect,
 }: {
@@ -134,6 +135,11 @@ export function FlowList({
     start: number,
     count: number,
   ) => Promise<FlowWindow>;
+  countFlowAfter: (
+    channel: string | null,
+    createdAt: string,
+    id: string,
+  ) => Promise<number>;
   selectedMessage: string | undefined;
   onSelect: (messageId: string) => void;
 }) {
@@ -144,7 +150,11 @@ export function FlowList({
     (start: number, count: number) => readFlow(channel, start, count),
     [readFlow, channel],
   );
-  const state = useListState(readThisFlow, redraw);
+  const countThisFlowAfter = useCallback(
+    (createdAt: string, id: string) => countFlowAfter(channel, createdAt, id),
+    [countFlowAfter, channel],
+  );
+  const state = useListState(readThisFlow, countThisFlowAfter, redraw);
   followTheChange(state, change);
   followTheTotal(state);
   const range = rangeOnScreen(state);

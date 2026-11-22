@@ -27,6 +27,11 @@ export type Core = {
     start: number,
     count: number,
   ) => Promise<FlowWindow>;
+  countFlowAfter: (
+    channel: string | null,
+    createdAt: string,
+    id: string,
+  ) => Promise<number>;
   readThread: (messageId: string) => Promise<Thread | null>;
   search: (query: string) => Promise<SearchResults>;
   openLink: (link: string) => Promise<void>;

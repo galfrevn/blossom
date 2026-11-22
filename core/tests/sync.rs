@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use blossom::contract::{ReplicaState, StopReason};
-use blossom::replica::{Actor, Batch, BoardIdentity, Claim, Replica, Via, replica_file_for};
+use blossom::reader::ReplicaReader;
+use blossom::replica::{Actor, Batch, Claim, Replica, Via, new_replica_file};
 use blossom::{
     BoardAccess, CopiedBoard, FollowError, KeepingEnded, Pacing, copy_board, follow_feed,
     keep_in_step,
@@ -68,9 +69,15 @@ async fn copy_from(board: &FakeBoard) -> Result<Copy, Box<dyn Error>> {
     let replica = Replica::open(&folder.path().join("board.sqlite"))?;
     let mut reported_states = Vec::new();
 
-    let copied = copy_board(&access, replica, quick_pacing(), |state| {
-        reported_states.push(state);
-    })
+    let copied = copy_board(
+        &access,
+        replica,
+        quick_pacing(),
+        |state| {
+            reported_states.push(state);
+        },
+        || {},
+    )
     .await?;
 
     Ok(Copy {
@@ -113,6 +120,55 @@ async fn the_copy_reports_its_progress_against_the_total_and_ends_with_everythin
             total: Some(7)
         })
     );
+}
+
+fn ids_in_flow(file: &Path) -> Option<Vec<String>> {
+    let reader = ReplicaReader::open(file).ok()?;
+    let window = reader.flow_window_in(None, 0, 100).ok()?;
+    Some(window.rows.into_iter().map(|row| row.id).collect())
+}
+
+fn is_whole(file: &Path) -> Option<bool> {
+    let replica = Replica::open(file).ok()?;
+    let feed_cursor = replica.feed_cursor().ok()?;
+    Some(feed_cursor.is_some())
+}
+
+fn the_two_newest_threads_with_their_replies() -> Vec<String> {
+    ["10", "12", "13", "15", "16"].map(String::from).to_vec()
+}
+
+#[tokio::test]
+async fn the_newest_threads_are_stored_with_their_replies_before_the_feed_is_replayed() {
+    let server = MockServer::start().await;
+    serve_board(
+        &server,
+        FakeBoard::with_history(history_across_two_channels()),
+    )
+    .await;
+    let access = BoardAccess::new(format!("{}/api/board", server.uri()), "token-of-ada");
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let replica = Replica::open(&file).unwrap();
+    let mut stored_first = None;
+
+    let copied = copy_board(
+        &access,
+        replica,
+        quick_pacing(),
+        |_| {},
+        || {
+            stored_first = ids_in_flow(&file);
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        stored_first,
+        Some(the_two_newest_threads_with_their_replies())
+    );
+    assert_eq!(copied.replica.message_count(), 7);
 }
 
 #[tokio::test]
@@ -214,7 +270,7 @@ async fn copy_then_follow_at(
     let folder = TempDir::new()?;
     let file = folder.path().join("board.sqlite");
     let replica = Replica::open(&file)?;
-    let copied = copy_board(&access, replica, quick_pacing(), |_| {}).await?;
+    let copied = copy_board(&access, replica, quick_pacing(), |_| {}, || {}).await?;
     let (sender, states) = unbounded_channel();
     let task = tokio::spawn(async move {
         follow_feed(
@@ -710,6 +766,7 @@ async fn an_empty_board_is_copied_again_when_reopened() {
 
     assert!(until_seen(&mut states, copying).await);
     task.abort();
+    assert_eq!(replica_files(first.folder.path()).unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -729,36 +786,103 @@ async fn a_cursor_refused_right_after_a_copy_stops_instead_of_copying_in_a_loop(
     assert!(matches!(ended, Some(KeepingEnded::Stopped(_))));
 }
 
+struct Announcement {
+    file: PathBuf,
+    shown: Option<Vec<String>>,
+    whole: Option<bool>,
+}
+
 #[tokio::test]
-async fn the_replica_being_kept_is_announced_once_it_is_named_after_its_board() {
+async fn the_replica_being_copied_is_announced_once_it_holds_the_newest_threads() {
     let board = FakeBoard::with_history(history_across_two_channels());
     let server = MockServer::builder().start().await;
     serve_board(&server, board.clone()).await;
     let folder = TempDir::new().unwrap();
     let access = BoardAccess::new(format!("{}/api/board", server.uri()), "token-of-ada");
     let replicas_folder = folder.path().to_path_buf();
-    let (sender, mut announced) = unbounded_channel();
+    let (announcements, mut announced) = unbounded_channel();
+    let (reports, mut states) = unbounded_channel();
     let task = tokio::spawn(async move {
         keep_in_step(
             &access,
             &replicas_folder,
             quick_pacing(),
             |file| {
-                sender.send(file.to_path_buf()).ok();
+                announcements
+                    .send(Announcement {
+                        file: file.to_path_buf(),
+                        shown: ids_in_flow(file),
+                        whole: is_whole(file),
+                    })
+                    .ok();
+            },
+            |state| {
+                reports.send(state).ok();
+            },
+        )
+        .await
+    });
+
+    assert!(until_reported(&mut states, &ReplicaState::Live { stored: 7 }).await);
+    task.abort();
+
+    let announcement = announced.recv().await.unwrap();
+    assert_eq!(
+        announcement.shown,
+        Some(the_two_newest_threads_with_their_replies())
+    );
+    assert_eq!(announcement.whole, Some(false));
+    assert!(announced.try_recv().is_err());
+    assert_eq!(
+        replica_files(folder.path()).unwrap(),
+        vec![announcement.file]
+    );
+}
+
+#[tokio::test]
+async fn a_copy_stopped_halfway_is_copied_again_and_never_followed_as_a_whole_one() {
+    let board = FakeBoard::with_history(history_across_two_channels());
+    let server = MockServer::builder().start().await;
+    serve_board(&server, board.clone()).await;
+    let folder = TempDir::new().unwrap();
+    let access = BoardAccess::new(format!("{}/api/board", server.uri()), "token-of-ada");
+    let replicas_folder = folder.path().to_path_buf();
+    let board_that_goes_quiet = board.clone();
+    let (halfway, mut reached_halfway) = unbounded_channel();
+    let quitting = tokio::spawn(async move {
+        keep_in_step(
+            &access,
+            &replicas_folder,
+            quick_pacing(),
+            |_| {
+                board_that_goes_quiet
+                    .pages_to_refuse
+                    .store(usize::MAX, std::sync::atomic::Ordering::SeqCst);
+                halfway.send(()).ok();
             },
             |_| {},
         )
         .await
     });
+    let stopped = tokio::time::timeout(Duration::from_secs(5), reached_halfway.recv()).await;
+    assert_eq!(stopped, Ok(Some(())));
+    quitting.abort();
+    assert!(quitting.await.is_err());
+    let half_copies = replica_files(folder.path()).unwrap();
+    assert_eq!(half_copies.len(), 1);
+    assert_eq!(is_whole(&half_copies[0]), Some(false));
+    board
+        .pages_to_refuse
+        .store(0, std::sync::atomic::Ordering::SeqCst);
 
-    let announced_file = tokio::time::timeout(Duration::from_secs(5), announced.recv())
-        .await
-        .unwrap()
-        .unwrap();
+    let (mut states, task) = keep_in_step_in(&server, folder.path());
+
+    assert!(until_seen(&mut states, copying).await);
+    assert!(until_reported(&mut states, &ReplicaState::Live { stored: 7 }).await);
     task.abort();
-
     let files = replica_files(folder.path()).unwrap();
-    assert_eq!(files, vec![announced_file]);
+    assert_eq!(files.len(), 1);
+    assert_eq!(is_whole(&files[0]), Some(true));
 }
 
 fn julian() -> FakeActor {
@@ -1109,28 +1233,17 @@ async fn a_replica_made_before_task_events_were_kept_is_copied_again() {
     serve_board(&server, board.clone()).await;
     let folder = TempDir::new().unwrap();
     let access = BoardAccess::new(format!("{}/api/board", server.uri()), "token-of-ada");
-    let identity = BoardIdentity {
-        oldest_id: String::from("10"),
-        oldest_created_at: time_at(0),
-    };
-    let outdated_file = replica_file_for(folder.path(), &access, &identity);
-    write_a_replica_from_before_task_events(
-        &outdated_file,
-        &identity.oldest_id,
-        &identity.oldest_created_at,
-        "event-25",
-    )
-    .unwrap();
+    let outdated_file = new_replica_file(folder.path(), &access).unwrap();
+    write_a_replica_from_before_task_events(&outdated_file, "10", &time_at(0), "event-25").unwrap();
 
     let (mut states, task) = keep_in_step_in(&server, folder.path());
 
     assert!(until_seen(&mut states, copying).await);
     assert!(until_reported(&mut states, &ReplicaState::Live { stored: 4 }).await);
     task.abort();
-    assert_eq!(
-        replica_files(folder.path()).unwrap(),
-        vec![outdated_file.clone()]
-    );
-    let replica = Replica::open(&outdated_file).unwrap();
+    let files = replica_files(folder.path()).unwrap();
+    assert_eq!(files.len(), 1);
+    assert!(!outdated_file.exists());
+    let replica = Replica::open(&files[0]).unwrap();
     assert_eq!(replica.task("10").unwrap().unwrap().state, "completed");
 }

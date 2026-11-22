@@ -63,7 +63,14 @@ async fn copied(history: &BoardHistory) -> Result<Copied, Box<dyn Error>> {
     let access = BoardAccess::new(format!("{}/api/board", server.uri()), "token-of-ada");
     let folder = TempDir::new()?;
     let file = folder.path().join("board.sqlite");
-    copy_board(&access, Replica::open(&file)?, quick_pacing(), |_| {}).await?;
+    copy_board(
+        &access,
+        Replica::open(&file)?,
+        quick_pacing(),
+        |_| {},
+        || {},
+    )
+    .await?;
     Ok(Copied {
         _server: server,
         _folder: folder,
@@ -311,6 +318,7 @@ async fn the_fleet_follows_the_replica() {
         Replica::open(&file).unwrap(),
         quick_pacing(),
         |_| {},
+        || {},
     )
     .await
     .unwrap();

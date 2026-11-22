@@ -27,7 +27,7 @@ devCsp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline
 [[app.security.capabilities]]
 identifier = "window"
 windows = ["main"]
-permissions = ["core:window:allow-start-dragging", "allow-subscribe-to-open-board", "allow-subscribe-to-replica", "allow-subscribe-to-channels", "allow-subscribe-to-flow", "allow-subscribe-to-fleet", "allow-read-flow", "allow-read-thread", "allow-search", "allow-open-link", "allow-subscribe-to-tasks", "allow-read-tasks", "allow-read-task-counts"]
+permissions = ["core:window:allow-start-dragging", "allow-subscribe-to-open-board", "allow-subscribe-to-replica", "allow-subscribe-to-channels", "allow-subscribe-to-flow", "allow-subscribe-to-fleet", "allow-read-flow", "allow-count-flow-after", "allow-read-thread", "allow-search", "allow-open-link", "allow-subscribe-to-tasks", "allow-read-tasks", "allow-read-task-counts"]
 
 [bundle]
 active = true

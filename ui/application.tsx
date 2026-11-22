@@ -24,6 +24,12 @@ type ReadFlow = (
   count: number,
 ) => Promise<FlowWindow>;
 
+type CountFlowAfter = (
+  channel: string | null,
+  createdAt: string,
+  id: string,
+) => Promise<number>;
+
 type ReadThread = (messageId: string) => Promise<Thread | null>;
 
 type OpenLink = (link: string) => Promise<void>;
@@ -37,6 +43,7 @@ function ChosenLens({
   clock,
   onWiden,
   readFlow,
+  countFlowAfter,
   readThread,
   openLink,
   readTasks,
@@ -50,6 +57,7 @@ function ChosenLens({
   clock: Clock;
   onWiden: () => void;
   readFlow: ReadFlow;
+  countFlowAfter: CountFlowAfter;
   readThread: ReadThread;
   openLink: OpenLink;
   readTasks: ReadTasks;
@@ -77,6 +85,7 @@ function ChosenLens({
       boardUrl={boardUrl}
       onWiden={onWiden}
       readFlow={readFlow}
+      countFlowAfter={countFlowAfter}
       readThread={readThread}
       openLink={openLink}
     />
@@ -91,6 +100,7 @@ export function Application({
   tasksStore,
   clock,
   readFlow,
+  countFlowAfter,
   readThread,
   openLink,
   readTasks,
@@ -103,6 +113,7 @@ export function Application({
   tasksStore: Store<TaskChange>;
   clock: Clock;
   readFlow: ReadFlow;
+  countFlowAfter: CountFlowAfter;
   readThread: ReadThread;
   openLink: OpenLink;
   readTasks: ReadTasks;
@@ -140,6 +151,7 @@ export function Application({
             clock={clock}
             onWiden={widen}
             readFlow={readFlow}
+            countFlowAfter={countFlowAfter}
             readThread={readThread}
             openLink={openLink}
             readTasks={readTasks}

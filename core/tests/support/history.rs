@@ -11,6 +11,7 @@ use crate::answers::{answer_discovery_naming, answer_me};
 
 pub const THREADS_PER_PAGE: usize = 2;
 pub const EVENTS_PER_PAGE: usize = 3;
+const REPLIES_PER_PAGE: usize = 500;
 pub const FRAMES_PER_STREAM: usize = 2;
 const PAUSE_WHEN_CAUGHT_UP: Duration = Duration::from_millis(20);
 pub const SLOW_PAGE: Duration = Duration::from_millis(2500);
@@ -422,37 +423,72 @@ impl BoardHistory {
         served
     }
 
-    fn thread_around(&self, id: &str) -> Option<Value> {
-        let message = self.current_view(id);
-        if message.is_null() {
-            return None;
-        }
-        let cursor = self.latest_cursor();
-        Some(json!({ "message": message, "replies": [], "cursor": cursor, "schedules": [] }))
-    }
-
-    fn threads_page(&self, before: Option<&str>) -> Value {
-        let views = self.current_views();
-        let mut roots: Vec<&Value> = views.values().filter(|view| view["re"].is_null()).collect();
-        roots.sort_by(|first, second| {
+    fn replies_to(views: &BTreeMap<String, Value>, root_id: &Value) -> Vec<Value> {
+        let mut replies: Vec<Value> = views
+            .values()
+            .filter(|view| view["re"] == *root_id)
+            .cloned()
+            .collect();
+        replies.sort_by(|first, second| {
             first["createdAt"]
                 .as_str()
                 .cmp(&second["createdAt"].as_str())
         });
+        replies
+    }
+
+    fn latest_activity(root: &Value, replies: &[Value]) -> String {
+        replies
+            .iter()
+            .chain(std::iter::once(root))
+            .filter_map(|view| view["createdAt"].as_str())
+            .max()
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    fn thread_around(&self, id: &str, limit: Option<usize>) -> Option<Value> {
+        let views = self.current_views();
+        let message = views.get(id)?;
+        let root = match message["re"].as_str() {
+            Some(root_id) => views.get(root_id)?,
+            None => message,
+        };
+        let replies = Self::replies_to(&views, &root["id"]);
+        let latest = replies
+            .len()
+            .saturating_sub(limit.unwrap_or(REPLIES_PER_PAGE));
+        let cursor = self.latest_cursor();
+        Some(json!({
+            "message": root,
+            "replies": replies[latest..],
+            "cursor": cursor,
+            "schedules": []
+        }))
+    }
+
+    fn threads_page(&self, before: Option<&str>) -> Value {
+        let views = self.current_views();
+        let mut threads: Vec<(String, Value)> = views
+            .values()
+            .filter(|view| view["re"].is_null())
+            .map(|root| {
+                let replies = Self::replies_to(&views, &root["id"]);
+                let activity = Self::latest_activity(root, &replies);
+                let last = replies.last().cloned().unwrap_or(Value::Null);
+                let summary = json!({ "message": root, "replies": replies.len(), "last": last });
+                (activity, summary)
+            })
+            .collect();
+        threads.sort_by(|first, second| first.0.cmp(&second.0));
         let end = before
             .and_then(|token| token.strip_prefix("older-"))
             .and_then(|index| index.parse::<usize>().ok())
-            .unwrap_or(roots.len());
+            .unwrap_or(threads.len());
         let start = end.saturating_sub(THREADS_PER_PAGE);
-        let threads: Vec<Value> = roots[start..end]
+        let page: Vec<Value> = threads[start..end]
             .iter()
-            .map(|root| {
-                let replies = views
-                    .values()
-                    .filter(|view| view["re"] == root["id"])
-                    .count();
-                json!({ "message": root, "replies": replies, "last": Value::Null })
-            })
+            .map(|(_, summary)| summary.clone())
             .collect();
         let older = if start == 0 {
             Value::Null
@@ -460,7 +496,7 @@ impl BoardHistory {
             Value::from(format!("older-{start}"))
         };
         json!({
-            "threads": threads,
+            "threads": page,
             "cursor": self.latest_cursor(),
             "older": older
         })
@@ -658,7 +694,7 @@ impl Respond for HistoryResponder {
                 None => return ResponseTemplate::new(400),
             },
             _ => match path.strip_prefix("/api/board/messages/") {
-                Some(id) => match history.thread_around(id) {
+                Some(id) => match history.thread_around(id, query_number(&query, "limit")) {
                     Some(thread) => thread,
                     None => return message_not_found(),
                 },
@@ -680,6 +716,10 @@ pub fn asked_actor_ids(request: &Request) -> Vec<String> {
         .filter(|(key, _)| key == "id")
         .map(|(_, value)| value.into_owned())
         .collect()
+}
+
+fn query_number(query: &BTreeMap<String, String>, key: &str) -> Option<usize> {
+    query.get(key).and_then(|value| value.parse().ok())
 }
 
 fn refused_cursor() -> ResponseTemplate {

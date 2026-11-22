@@ -25,7 +25,7 @@ use tauri::async_runtime::JoinHandle;
 use tauri::ipc::{Channel, IpcResponse};
 use tauri::webview::PageLoadEvent;
 use tauri::{Manager, State};
-use tokio::sync::watch;
+use tokio::sync::{Notify, watch};
 
 const TIME_BETWEEN_LOOKS: Duration = Duration::from_secs(1);
 const TIME_BETWEEN_FLEET_READS: Duration = Duration::from_secs(1);
@@ -55,6 +55,7 @@ struct Session {
     replicas_folder: Option<PathBuf>,
     replica_state: watch::Sender<Option<ReplicaState>>,
     reader: Mutex<Option<ReplicaReader>>,
+    replica_changed: Notify,
     channels: watch::Sender<Option<Vec<String>>>,
     flow: watch::Sender<Option<FlowChange>>,
     flow_revision: AtomicU32,
@@ -68,6 +69,7 @@ struct Session {
     forwarding_fleet: RunningTask,
     forwarding_tasks: RunningTask,
     keeping_in_step: RunningTask,
+    refreshing_from_the_replica: RunningTask,
     rereading_the_fleet: RunningTask,
     open_board_gone: AtomicBool,
 }
@@ -83,6 +85,7 @@ impl Session {
             replicas_folder,
             replica_state,
             reader: Mutex::new(None),
+            replica_changed: Notify::new(),
             channels,
             flow,
             flow_revision: AtomicU32::new(0),
@@ -96,6 +99,7 @@ impl Session {
             forwarding_fleet: RunningTask::default(),
             forwarding_tasks: RunningTask::default(),
             keeping_in_step: RunningTask::default(),
+            refreshing_from_the_replica: RunningTask::default(),
             rereading_the_fleet: RunningTask::default(),
             open_board_gone: AtomicBool::new(false),
         }
@@ -103,6 +107,9 @@ impl Session {
 
     fn start_keeping_in_step(self: &Arc<Session>, access: BoardAccess) {
         self.forget_the_replica();
+        let session = Arc::clone(self);
+        let refreshing = tauri::async_runtime::spawn(refresh_as_the_replica_changes(session));
+        self.refreshing_from_the_replica.replace(refreshing);
         let session = Arc::clone(self);
         let keeping =
             tauri::async_runtime::spawn(async move { session.keep_in_step(access).await });
@@ -114,6 +121,7 @@ impl Session {
 
     fn stop_keeping_in_step(&self) {
         self.keeping_in_step.stop();
+        self.refreshing_from_the_replica.stop();
         self.rereading_the_fleet.stop();
         self.replica_state.send_replace(None);
         self.forget_the_replica();
@@ -205,6 +213,19 @@ impl Session {
             .map_err(|error| error.to_string())
     }
 
+    fn count_flow_after(
+        &self,
+        channel: Option<&str>,
+        created_at: &str,
+        id: &str,
+    ) -> Result<u32, String> {
+        let reader = self.reader.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(reader) = reader.as_ref() else {
+            return Err(String::from("no replica is open"));
+        };
+        Ok(reader.flow_lines_after_in(channel, created_at, id))
+    }
+
     fn read_thread(&self, message_id: &str) -> Result<Option<Thread>, String> {
         let reader = self.reader.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(reader) = reader.as_ref() else {
@@ -235,7 +256,7 @@ impl Session {
             |file| self.read_the_replica(file),
             |state| {
                 self.replica_state.send_replace(Some(state));
-                self.refresh_from_the_replica();
+                self.replica_changed.notify_one();
             },
         )
         .await;
@@ -278,6 +299,16 @@ fn read_flow(
     session.read_flow(channel.as_deref(), start, count)
 }
 
+#[tauri::command]
+fn count_flow_after(
+    channel: Option<String>,
+    created_at: String,
+    id: String,
+    session: State<'_, Arc<Session>>,
+) -> Result<u32, String> {
+    session.count_flow_after(channel.as_deref(), &created_at, &id)
+}
+
 #[tauri::command(async)]
 fn search(query: String, session: State<'_, Arc<Session>>) -> Result<SearchResults, String> {
     session.search(&query)
@@ -317,6 +348,13 @@ fn subscribe_to_fleet(channel: Channel<Vec<Agent>>, session: State<'_, Arc<Sessi
     let receiver = session.fleet.subscribe();
     let forwarding = tauri::async_runtime::spawn(forward(channel, receiver));
     session.forwarding_fleet.replace(forwarding);
+}
+
+async fn refresh_as_the_replica_changes(session: Arc<Session>) {
+    loop {
+        session.replica_changed.notified().await;
+        session.refresh_from_the_replica();
+    }
 }
 
 async fn reread_the_fleet_as_time_passes(session: Arc<Session>) {
@@ -400,6 +438,7 @@ fn main() -> ExitCode {
             subscribe_to_flow,
             subscribe_to_fleet,
             read_flow,
+            count_flow_after,
             read_thread,
             search,
             open_link,

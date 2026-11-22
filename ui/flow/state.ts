@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import type { FlowChange, FlowRow, FlowWindow } from "../core/contract";
 import { Windows } from "../core/windows";
+import { NewMessagesBelow } from "./below";
 import { RowHeights } from "./heights";
 import type { WatchedRows } from "./watch";
 
@@ -17,7 +18,7 @@ export type ListState = {
   scrollTop: number;
   viewportHeight: number;
   keepsToTheBottom: boolean;
-  totalWhenItLeftTheBottom: number;
+  newBelow: NewMessagesBelow;
   watchedRows: WatchedRows | null;
 };
 
@@ -36,7 +37,13 @@ export function followTheChange(
   }
   state.revision = change.revision;
   state.heights.forgetMeasurements();
+  if (state.keepsToTheBottom) {
+    const range = rangeOnScreen(state);
+    state.windows.renewTheEnd(range.last - range.first + 1);
+    return;
+  }
   state.windows.renew();
+  state.newBelow.recount();
 }
 
 export function followTheTotal(state: ListState) {
@@ -65,6 +72,7 @@ export function rangeOnScreen(state: ListState) {
 
 export function useListState(
   readFlow: (start: number, count: number) => Promise<FlowWindow>,
+  countFlowAfter: (createdAt: string, id: string) => Promise<number>,
   redraw: () => void,
 ): ListState {
   const stateRef = useRef<ListState | null>(null);
@@ -76,7 +84,7 @@ export function useListState(
       scrollTop: 0,
       viewportHeight: 0,
       keepsToTheBottom: true,
-      totalWhenItLeftTheBottom: 0,
+      newBelow: new NewMessagesBelow(countFlowAfter, redraw),
       watchedRows: null,
     };
   }
@@ -87,5 +95,5 @@ export function newBelowOf(state: ListState): number {
   if (state.keepsToTheBottom) {
     return 0;
   }
-  return Math.max(0, state.heights.count - state.totalWhenItLeftTheBottom);
+  return state.newBelow.count();
 }

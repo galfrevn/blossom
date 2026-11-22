@@ -54,13 +54,18 @@ export function recordTheScrollPosition(
   scroller: HTMLElement,
   state: ListState,
 ) {
+  const scrolledUp = scroller.scrollTop < state.scrollTop;
   state.scrollTop = scroller.scrollTop;
   state.viewportHeight = scroller.clientHeight;
-  const atTheBottom = isAtTheBottom(scroller);
-  if (state.keepsToTheBottom && !atTheBottom) {
-    state.totalWhenItLeftTheBottom = state.heights.count;
+  if (isAtTheBottom(scroller)) {
+    state.keepsToTheBottom = true;
+    return;
   }
-  state.keepsToTheBottom = atTheBottom;
+  if (state.keepsToTheBottom && scrolledUp) {
+    const newestRow = state.windows.rowAt(state.heights.count - 1);
+    state.newBelow.leaveTheBottomAt(newestRow);
+    state.keepsToTheBottom = false;
+  }
 }
 
 export function useScrollFollowing(

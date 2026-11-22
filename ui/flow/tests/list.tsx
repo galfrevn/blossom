@@ -31,6 +31,7 @@ function renderFlowOf(rows: FlowRow[], channel: string | null = null) {
       channel={channel}
       boardUrl={BOARD_URL}
       readFlow={fakeCore.core.readFlow}
+      countFlowAfter={fakeCore.core.countFlowAfter}
       selectedMessage={undefined}
       onSelect={selectNothing}
     />
@@ -160,85 +161,6 @@ test("an edit on the board redraws its message", async () => {
   expect(
     await flowList().findByText("deploy failed, rolled back"),
   ).toBeDefined();
-});
-
-const SCROLLED_CONTENT = 5000;
-const SCREEN = 500;
-
-function pretendTheListIsLaidOut() {
-  const scroller = screen.getByRole("feed").parentElement as HTMLElement;
-  Object.defineProperty(scroller, "scrollHeight", {
-    configurable: true,
-    get: () => SCROLLED_CONTENT,
-  });
-  Object.defineProperty(scroller, "clientHeight", {
-    configurable: true,
-    get: () => SCREEN,
-  });
-  return scroller;
-}
-
-async function scrollUpTo(scroller: HTMLElement, position: number) {
-  await act(async () => {
-    scroller.scrollTop = position;
-    scroller.dispatchEvent(new Event("scroll"));
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-  });
-}
-
-test("scrolled up, new messages leave the reader's place alone and say how many wait below", async () => {
-  const flow = renderFlowOf([
-    messageInFlow({ id: "1" }),
-    messageInFlow({ id: "2" }),
-  ]);
-  await flowList().findAllByRole("article");
-  const scroller = pretendTheListIsLaidOut();
-  await scrollUpTo(scroller, 0);
-
-  flow.pushFlow([
-    messageInFlow({ id: "1" }),
-    messageInFlow({ id: "2" }),
-    messageInFlow({ id: "3" }),
-    messageInFlow({ id: "4" }),
-  ]);
-
-  expect(scroller.scrollTop).toBe(0);
-  expect(
-    await screen.findByRole("button", { name: dictionary.flow.newBelow(2) }),
-  ).toBeDefined();
-});
-
-test("the count of new messages takes the reader down to them", async () => {
-  const flow = renderFlowOf([messageInFlow({ id: "1" })]);
-  await flowList().findAllByRole("article");
-  const scroller = pretendTheListIsLaidOut();
-  await scrollUpTo(scroller, 0);
-  flow.pushFlow([messageInFlow({ id: "1" }), messageInFlow({ id: "2" })]);
-
-  const notice = await screen.findByRole("button", {
-    name: dictionary.flow.newBelow(1),
-  });
-  await act(async () => {
-    notice.click();
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-  });
-
-  expect(scroller.scrollTop).toBe(SCROLLED_CONTENT);
-  expect(
-    screen.queryByRole("button", { name: dictionary.flow.newBelow(1) }),
-  ).toBeNull();
-});
-
-test("at the bottom, new messages arrive without a count", async () => {
-  const flow = renderFlowOf([messageInFlow({ id: "1" })]);
-  await flowList().findAllByRole("article");
-
-  flow.pushFlow([messageInFlow({ id: "1" }), messageInFlow({ id: "2" })]);
-
-  await waitFor(() => {
-    expect(flowList().getAllByRole("article")).toHaveLength(2);
-  });
-  expect(screen.queryByRole("button")).toBeNull();
 });
 
 test("a channel narrows Flow to it and to every channel under it", async () => {

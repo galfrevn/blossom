@@ -72,6 +72,7 @@ function renderFlowLensOf(rows: FlowRow[]) {
       boardUrl="http://127.0.0.1:4200/api/board"
       onWiden={vi.fn()}
       readFlow={fakeCore.core.readFlow}
+      countFlowAfter={fakeCore.core.countFlowAfter}
       readThread={fakeCore.core.readThread}
       openLink={fakeCore.core.openLink}
     />,

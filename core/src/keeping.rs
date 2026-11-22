@@ -13,9 +13,7 @@ use crate::copy::{CopyError, copy_board};
 use crate::feed::{FollowError, follow_feed};
 use crate::pacing::{Pacing, Retries};
 use crate::protocol;
-use crate::replica::{
-    BoardIdentity, Replica, ReplicaError, known_replica_files, new_replica_file, replica_file_for,
-};
+use crate::replica::{BoardIdentity, Replica, ReplicaError, known_replica_files, new_replica_file};
 
 pub enum KeepingEnded {
     BoardGone,
@@ -119,13 +117,25 @@ async fn keep(
         };
         let copied_just_now = known.is_none();
         let start = match known {
-            Some(start) => start,
-            None => match copy_into_a_new_replica(access, replicas_folder, pacing, report).await {
-                Ok(start) => start,
-                Err(interrupted) => return interrupted,
-            },
+            Some(start) => {
+                announce_replica(&start.file);
+                start
+            }
+            None => {
+                let copied = copy_into_a_new_replica(
+                    access,
+                    replicas_folder,
+                    pacing,
+                    &mut *announce_replica,
+                    &mut *report,
+                )
+                .await;
+                match copied {
+                    Ok(start) => start,
+                    Err(interrupted) => return interrupted,
+                }
+            }
         };
-        announce_replica(&start.file);
         let followed: Result<Infallible, FollowError> = follow_feed(
             access,
             start.replica,
@@ -170,28 +180,22 @@ async fn start_from_a_known_replica(
         let opened = open_known_replica(file.clone())
             .await
             .map_err(Interrupted::unwritable)?;
-        let known = match opened {
-            KnownReplicaOpening::Opened(known) => known,
-            KnownReplicaOpening::MadeWithAnotherSchema => {
-                discard_replica(file)
-                    .await
-                    .map_err(Interrupted::unwritable)?;
-                continue;
-            }
-        };
-        let (Some(identity), Some(feed_cursor)) = (known.identity, known.feed_cursor) else {
+        let KnownReplicaOpening::Recognizable(known) = opened else {
+            discard_replica(file)
+                .await
+                .map_err(Interrupted::unwritable)?;
             continue;
         };
         let stored = known.replica.message_count();
         let holds = checker
-            .board_holds(&identity, &mut || {
+            .board_holds(&known.identity, &mut || {
                 report(ReplicaState::Reconnecting { stored });
             })
             .await?;
         if holds {
             return Ok(Some(Start {
                 replica: known.replica,
-                feed_cursor,
+                feed_cursor: known.feed_cursor,
                 file,
             }));
         }
@@ -203,40 +207,37 @@ async fn copy_into_a_new_replica(
     access: &BoardAccess,
     replicas_folder: &Path,
     pacing: Pacing,
+    announce_replica: &mut impl FnMut(&Path),
     report: &mut impl FnMut(ReplicaState),
 ) -> Result<Start, Interrupted> {
-    let new_file = new_replica_file(replicas_folder, access);
-    let replica = open_new_replica(new_file.clone())
+    let file = new_replica_file(replicas_folder, access).map_err(|error| {
+        Interrupted::unwritable(format!("a new replica could not be made: {error}"))
+    })?;
+    let replica = open_new_replica(file.clone())
         .await
         .map_err(Interrupted::unwritable)?;
-    let copied = copy_board(access, replica, pacing, &mut *report).await?;
-    let Some(identity) = copied.identity else {
-        return Ok(Start {
-            replica: copied.replica,
-            feed_cursor: copied.feed_cursor,
-            file: new_file,
-        });
-    };
-    let named_file = replica_file_for(replicas_folder, access, &identity);
-    let replica = name_replica(copied.replica, identity, new_file, named_file.clone())
-        .await
-        .map_err(Interrupted::unwritable)?;
+    let copied = copy_board(access, replica, pacing, &mut *report, || {
+        announce_replica(&file);
+    })
+    .await?;
     Ok(Start {
-        replica,
+        replica: copied.replica,
         feed_cursor: copied.feed_cursor,
-        file: named_file,
+        file,
     })
 }
 
 struct KnownReplica {
     replica: Replica,
-    identity: Option<BoardIdentity>,
-    feed_cursor: Option<String>,
+    identity: BoardIdentity,
+    feed_cursor: String,
 }
 
 enum KnownReplicaOpening {
-    Opened(KnownReplica),
+    Recognizable(KnownReplica),
     MadeWithAnotherSchema,
+    Unfinished,
+    WithNothingToRecognizeItsBoardBy,
 }
 
 async fn open_known_replica(file: PathBuf) -> Result<KnownReplicaOpening, String> {
@@ -248,9 +249,13 @@ async fn open_known_replica(file: PathBuf) -> Result<KnownReplicaOpening, String
             }
             Err(error) => return Err(error.to_string()),
         };
-        let identity = replica.identity().map_err(|error| error.to_string())?;
-        let feed_cursor = replica.feed_cursor().map_err(|error| error.to_string())?;
-        Ok(KnownReplicaOpening::Opened(KnownReplica {
+        let Some(feed_cursor) = replica.feed_cursor().map_err(|error| error.to_string())? else {
+            return Ok(KnownReplicaOpening::Unfinished);
+        };
+        let Some(identity) = replica.identity().map_err(|error| error.to_string())? else {
+            return Ok(KnownReplicaOpening::WithNothingToRecognizeItsBoardBy);
+        };
+        Ok(KnownReplicaOpening::Recognizable(KnownReplica {
             replica,
             identity,
             feed_cursor,
@@ -260,36 +265,7 @@ async fn open_known_replica(file: PathBuf) -> Result<KnownReplicaOpening, String
 }
 
 async fn open_new_replica(file: PathBuf) -> Result<Replica, String> {
-    on_storage_thread(move || {
-        if let Some(folder) = file.parent() {
-            fs::create_dir_all(folder)
-                .map_err(|error| format!("the replicas' folder could not be made: {error}"))?;
-        }
-        remove_replica_files(&file)
-            .map_err(|error| format!("an unfinished replica could not be removed: {error}"))?;
-        Replica::open(&file).map_err(|error| error.to_string())
-    })
-    .await
-}
-
-async fn name_replica(
-    mut replica: Replica,
-    identity: BoardIdentity,
-    new_file: PathBuf,
-    named_file: PathBuf,
-) -> Result<Replica, String> {
-    on_storage_thread(move || {
-        replica
-            .keep_identity(&identity)
-            .map_err(|error| error.to_string())?;
-        drop(replica);
-        remove_replica_files(&named_file)
-            .map_err(|error| format!("an older replica could not be replaced: {error}"))?;
-        fs::rename(&new_file, &named_file)
-            .map_err(|error| format!("the new replica could not be named: {error}"))?;
-        Replica::open(&named_file).map_err(|error| error.to_string())
-    })
-    .await
+    on_storage_thread(move || Replica::open(&file).map_err(|error| error.to_string())).await
 }
 
 async fn discard_replica(file: PathBuf) -> Result<(), String> {

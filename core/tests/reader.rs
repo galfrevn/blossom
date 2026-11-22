@@ -668,3 +668,116 @@ fn the_flow_s_order_is_read_from_its_index_alone() {
         "{plan:?}"
     );
 }
+
+fn view_numbered(index: u32) -> Result<MessageView, serde_json::Error> {
+    view_at(&format!("{index:04}"), index / 60, index % 60, "work")
+}
+
+#[test]
+fn a_large_batch_of_older_messages_takes_its_places_among_those_already_read() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    let read_first: Vec<MessageView> = (0..1200)
+        .step_by(2)
+        .map(|index| view_numbered(index).unwrap())
+        .collect();
+    replica.apply(&Batch::from_views(read_first)).unwrap();
+    let mut reader = ReplicaReader::open(&file).unwrap();
+
+    let arriving: Vec<MessageView> = (1..1200)
+        .step_by(2)
+        .rev()
+        .map(|index| view_numbered(index).unwrap())
+        .chain([view_numbered(1200).unwrap()])
+        .collect();
+    replica.apply(&Batch::from_views(arriving)).unwrap();
+    reader.catch_up().unwrap();
+
+    let window = reader.flow_window_in(None, 0, 2000).unwrap();
+    let expected: Vec<String> = (0..=1200).map(|index| format!("{index:04}")).collect();
+    assert_eq!(ids_of(&window), expected);
+}
+
+#[test]
+fn the_lines_after_a_message_leave_out_those_that_landed_before_it() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            view_at("2", 2, 0, "second").unwrap(),
+            view_at("3", 3, 0, "third").unwrap(),
+        ]))
+        .unwrap();
+    let mut reader = ReplicaReader::open(&file).unwrap();
+    let newest = reader.flow_window_in(None, 1, 1).unwrap().rows.remove(0);
+    assert_eq!(
+        reader.flow_lines_after_in(None, &newest.created_at, &newest.id),
+        0
+    );
+
+    replica
+        .apply(&Batch::from_views(vec![
+            view_at("1", 1, 0, "older").unwrap(),
+            view_at("0", 0, 0, "oldest").unwrap(),
+            view_at("4", 4, 0, "newer").unwrap(),
+        ]))
+        .unwrap();
+    reader.catch_up().unwrap();
+
+    assert_eq!(
+        reader.flow_lines_after_in(None, &newest.created_at, &newest.id),
+        1
+    );
+}
+
+#[test]
+fn the_lines_after_a_message_in_a_narrowed_flow_are_only_those_of_its_channel() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            view_in_at("fleet/www", "1", 0).unwrap(),
+            view_in_at("fleet/www", "2", 1).unwrap(),
+            view_in_at("general", "3", 2).unwrap(),
+            view_in_at("fleet/api", "4", 3).unwrap(),
+            view_in_at("general", "5", 4).unwrap(),
+        ]))
+        .unwrap();
+    let reader = ReplicaReader::open(&file).unwrap();
+
+    let after_the_first =
+        reader.flow_lines_after_in(Some("fleet"), "2026-11-21T10:00:00.000Z", "1");
+
+    assert_eq!(after_the_first, 2);
+}
+
+#[test]
+fn a_fold_that_grew_after_a_message_is_one_line_after_it() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            root_task_in("fleet/www", "10", 0).unwrap(),
+            progress("11", "10", "fleet/www", 1, "claude").unwrap(),
+        ]))
+        .unwrap();
+    let mut reader = ReplicaReader::open(&file).unwrap();
+    let fold = reader.flow_window_in(None, 1, 1).unwrap().rows.remove(0);
+
+    replica
+        .apply(&Batch::from_views(vec![
+            progress("12", "10", "fleet/www", 2, "codex").unwrap(),
+            progress("13", "10", "fleet/www", 3, "claude").unwrap(),
+        ]))
+        .unwrap();
+    reader.catch_up().unwrap();
+
+    assert_eq!(
+        reader.flow_lines_after_in(None, &fold.created_at, &fold.id),
+        1
+    );
+}

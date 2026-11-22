@@ -18,7 +18,30 @@ impl OrderedMessage {
     }
 
     pub(super) fn comes_before(&self, created_at: &str, id: &str) -> bool {
-        (&*self.created_at, &*self.id) < (created_at, id)
+        self.order() < (created_at, id)
+    }
+
+    pub(super) fn comes_after(&self, created_at: &str, id: &str) -> bool {
+        self.order() > (created_at, id)
+    }
+
+    fn order(&self) -> (&str, &str) {
+        (&self.created_at, &self.id)
+    }
+}
+
+pub(super) fn place_in_order(flow: &mut Vec<OrderedMessage>, arrived: Vec<OrderedMessage>) {
+    let Some(earliest) = arrived
+        .iter()
+        .min_by(|first, second| first.order().cmp(&second.order()))
+    else {
+        return;
+    };
+    let first_to_move =
+        flow.partition_point(|existing| existing.comes_before(&earliest.created_at, &earliest.id));
+    flow.extend(arrived);
+    if let Some(moved) = flow.get_mut(first_to_move..) {
+        moved.sort_by(|first, second| first.order().cmp(&second.order()));
     }
 }
 

@@ -113,3 +113,95 @@ test("after a change on the board, the blocks in view are read again and shown u
   expect(board.requests).toEqual([FIRST_BLOCK, FIRST_BLOCK]);
   expect(windows.rowAt(A_FEW_ROWS)?.text).toBe("after");
 });
+
+const GROWN_BOARD_SIZE = 1500;
+const GROWN_AGAIN_BOARD_SIZE = 1600;
+
+function boardThatGrows() {
+  const board = { size: BOARD_SIZE, text: "before" };
+  const read = (start: number, count: number): Promise<Window<NumberedRow>> => {
+    const last = Math.min(board.size, start + count);
+    const rows: NumberedRow[] = [];
+    for (let index = start; index < last; index += 1) {
+      rows.push(rowNumbered(index, board.text));
+    }
+    return Promise.resolve({ total: board.size, start, rows });
+  };
+  return { board, read };
+}
+
+test("at the bottom, a change shows the newest rows with the new total at once, and the rows before it until then", async () => {
+  const { board, read } = boardThatGrows();
+  const windows = new Windows(read, ROWS_IN_A_BLOCK, ENOUGH_BLOCKS, nothing);
+  windows.need(BOARD_SIZE - ROWS_IN_A_BLOCK, BOARD_SIZE - 1);
+  await settle();
+
+  board.size = GROWN_BOARD_SIZE;
+  board.text = "after";
+  windows.renewTheEnd(A_FEW_ROWS);
+  expect(windows.total()).toBe(BOARD_SIZE);
+  expect(windows.rowAt(BOARD_SIZE - 1)?.text).toBe("before");
+  await settle();
+
+  expect(windows.total()).toBe(GROWN_BOARD_SIZE);
+  expect(windows.rowAt(GROWN_BOARD_SIZE - 1)?.text).toBe("after");
+  expect(windows.rowAt(BOARD_SIZE - 1)).toBeUndefined();
+});
+
+test("a change while the end is read is read too", async () => {
+  const { board, read } = boardThatGrows();
+  const windows = new Windows(read, ROWS_IN_A_BLOCK, ENOUGH_BLOCKS, nothing);
+  windows.need(BOARD_SIZE - ROWS_IN_A_BLOCK, BOARD_SIZE - 1);
+  await settle();
+
+  board.size = GROWN_BOARD_SIZE;
+  windows.renewTheEnd(A_FEW_ROWS);
+  board.size = GROWN_AGAIN_BOARD_SIZE;
+  windows.renewTheEnd(A_FEW_ROWS);
+  await settle();
+
+  expect(windows.total()).toBe(GROWN_AGAIN_BOARD_SIZE);
+  expect(windows.rowAt(GROWN_AGAIN_BOARD_SIZE - 1)?.id).toBe(
+    String(GROWN_AGAIN_BOARD_SIZE - 1),
+  );
+});
+
+function boardAnsweredByHand() {
+  const board = { size: BOARD_SIZE };
+  const unanswered: Array<() => void> = [];
+  const read = (start: number, count: number): Promise<Window<NumberedRow>> =>
+    new Promise((resolve) => {
+      const sizeWhenAsked = board.size;
+      unanswered.push(() => {
+        const last = Math.min(sizeWhenAsked, start + count);
+        const rows: NumberedRow[] = [];
+        for (let index = start; index < last; index += 1) {
+          rows.push(rowNumbered(index, "work"));
+        }
+        resolve({ total: sizeWhenAsked, rows });
+      });
+    });
+  const answerTheNewest = async () => {
+    unanswered.pop()?.();
+    await settle();
+  };
+  return { board, read, answerTheNewest };
+}
+
+test("a block asked for before the end was read is not shown once the end is", async () => {
+  const { board, read, answerTheNewest } = boardAnsweredByHand();
+  const windows = new Windows(read, ROWS_IN_A_BLOCK, ENOUGH_BLOCKS, nothing);
+  windows.need(FIRST_BLOCK, A_FEW_ROWS);
+
+  board.size = GROWN_BOARD_SIZE;
+  windows.renewTheEnd(A_FEW_ROWS);
+  await answerTheNewest();
+  await answerTheNewest();
+  await answerTheNewest();
+
+  expect(windows.total()).toBe(GROWN_BOARD_SIZE);
+  expect(windows.rowAt(FIRST_BLOCK + A_FEW_ROWS)).toBeUndefined();
+  expect(windows.rowAt(GROWN_BOARD_SIZE - 1)?.id).toBe(
+    String(GROWN_BOARD_SIZE - 1),
+  );
+});

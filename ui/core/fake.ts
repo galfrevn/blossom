@@ -42,6 +42,13 @@ function isWithin(channel: string, narrowedTo: string | null): boolean {
   return channel === narrowedTo || channel.startsWith(`${narrowedTo}/`);
 }
 
+function comesAfter(row: FlowRow, createdAt: string, id: string): boolean {
+  if (row.createdAt !== createdAt) {
+    return row.createdAt > createdAt;
+  }
+  return row.id > id;
+}
+
 function threadHolding(threads: Thread[], messageId: string): Thread | null {
   const holding = threads.find((thread) =>
     thread.messages.some((message) => message.id === messageId),
@@ -113,6 +120,45 @@ function createFakeLinks() {
   };
 }
 
+function createFakeFlow() {
+  const flow = createFakeSubscription<FlowChange>();
+  let flowRows: FlowRow[] = [];
+  let threads: Thread[] = [];
+  let flowRevision = 0;
+  const announceTheChange = () => {
+    flowRevision += 1;
+    flow.push({ revision: flowRevision });
+  };
+  return {
+    subscribeToFlow: flow.subscribe,
+    readFlow: (channel: string | null, start: number, count: number) => {
+      const narrowed = flowRows.filter((row) => isWithin(row.channel, channel));
+      return Promise.resolve({
+        total: narrowed.length,
+        start,
+        rows: narrowed.slice(start, start + count),
+      });
+    },
+    countFlowAfter: (channel: string | null, createdAt: string, id: string) => {
+      const after = flowRows.filter(
+        (row) =>
+          isWithin(row.channel, channel) && comesAfter(row, createdAt, id),
+      );
+      return Promise.resolve(after.length);
+    },
+    readThread: (messageId: string) =>
+      Promise.resolve(threadHolding(threads, messageId)),
+    pushFlow: (rows: FlowRow[]) => {
+      flowRows = rows;
+      announceTheChange();
+    },
+    pushThreads: (newThreads: Thread[]) => {
+      threads = newThreads;
+      announceTheChange();
+    },
+  };
+}
+
 export type FakeCore = {
   core: Core;
   pushOpenBoard: (openBoard: OpenBoard) => void;
@@ -130,53 +176,28 @@ export function createFakeCore(): FakeCore {
   const openBoard = createFakeSubscription<OpenBoard>();
   const replica = createFakeSubscription<ReplicaState>();
   const channels = createFakeSubscription<string[]>();
-  const flow = createFakeSubscription<FlowChange>();
   const fleet = createFakeSubscription<Agent[]>();
+  const { pushFlow, pushThreads, ...flow } = createFakeFlow();
   const { pushTasks, ...tasks } = createFakeTasks();
   const { linksOpened, ...links } = createFakeLinks();
-  let flowRows: FlowRow[] = [];
-  let threads: Thread[] = [];
-  let flowRevision = 0;
-  const announceTheChange = () => {
-    flowRevision += 1;
-    flow.push({ revision: flowRevision });
-  };
   const searchAnswers = new Map<string, SearchResults>();
   return {
     core: {
       subscribeToOpenBoard: openBoard.subscribe,
       subscribeToReplica: replica.subscribe,
       subscribeToChannels: channels.subscribe,
-      subscribeToFlow: flow.subscribe,
       subscribeToFleet: fleet.subscribe,
-      readFlow: (channel, start, count) => {
-        const narrowed = flowRows.filter((row) =>
-          isWithin(row.channel, channel),
-        );
-        return Promise.resolve({
-          total: narrowed.length,
-          start,
-          rows: narrowed.slice(start, start + count),
-        });
-      },
-      readThread: (messageId) =>
-        Promise.resolve(threadHolding(threads, messageId)),
       search: (query) =>
         Promise.resolve(searchAnswers.get(query) ?? noSearchResults()),
+      ...flow,
       ...links,
       ...tasks,
     },
     pushOpenBoard: openBoard.push,
     pushReplicaState: replica.push,
     pushChannels: channels.push,
-    pushFlow: (rows) => {
-      flowRows = rows;
-      announceTheChange();
-    },
-    pushThreads: (newThreads) => {
-      threads = newThreads;
-      announceTheChange();
-    },
+    pushFlow,
+    pushThreads,
     pushFleet: fleet.push,
     answerSearch: (query, results) => {
       searchAnswers.set(query, results);

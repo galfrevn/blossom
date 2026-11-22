@@ -5,7 +5,7 @@ mod search;
 mod tasks;
 mod thread;
 
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -14,7 +14,7 @@ use rusqlite::{CachedStatement, Connection, OpenFlags, Row, params};
 
 use crate::contract::{Agent, FlowFold, FlowRow, FlowWindow, SearchResults};
 use crate::replica::ReplicaError;
-use lines::{Line, OrderedMessage, lines_of};
+use lines::{Line, OrderedMessage, lines_of, place_in_order};
 use numbers::Numbers;
 use tasks::TaskOrder;
 
@@ -134,6 +134,7 @@ impl ReplicaReader {
 
     pub fn catch_up(&mut self) -> Result<bool, ReplicaError> {
         let mut arrived = Vec::new();
+        let mut last_arrival = self.last_arrival;
         {
             let mut statement = self.connection.prepare_cached(&format!(
                 "SELECT arrivals.sequence, {ORDERED_MESSAGE_COLUMNS}
@@ -143,21 +144,20 @@ impl ReplicaReader {
             ))?;
             let mut rows = statement.query(params![self.last_arrival])?;
             while let Some(row) = rows.next()? {
-                let sequence: i64 = row.get(0)?;
-                let ordered = ordered_message(row, 1, &mut self.channels, &mut self.authors)?;
-                arrived.push((sequence, ordered));
+                last_arrival = row.get(0)?;
+                arrived.push(ordered_message(
+                    row,
+                    1,
+                    &mut self.channels,
+                    &mut self.authors,
+                )?);
             }
         }
         if arrived.is_empty() {
             return Ok(false);
         }
-        for (sequence, ordered) in arrived {
-            let place = self.flow.partition_point(|existing| {
-                existing.comes_before(&ordered.created_at, &ordered.id)
-            });
-            self.flow.insert(place, ordered);
-            self.last_arrival = sequence;
-        }
+        place_in_order(&mut self.flow, arrived);
+        self.last_arrival = last_arrival;
         self.lines = lines_of(&self.flow);
         self.revision = self.revision.wrapping_add(1);
         Ok(true)
@@ -177,8 +177,34 @@ impl ReplicaReader {
                 count,
             );
         };
-        let mut narrowed = self.narrowed.borrow_mut();
-        let is_current = narrowed.as_ref().is_some_and(|narrowed| {
+        let lines = self.lines_within(channel);
+        self.window_of(
+            lines.len(),
+            |index| lines.get(index).and_then(|line| self.lines.get(*line)),
+            start,
+            count,
+        )
+    }
+
+    pub fn flow_lines_after_in(&self, channel: Option<&str>, created_at: &str, id: &str) -> u32 {
+        let first_after = self
+            .flow
+            .partition_point(|message| !message.comes_after(created_at, id));
+        let ends_before = |line: &Line| line.latest().is_some_and(|latest| latest < first_after);
+        let lines_after = match channel {
+            None => self.lines.len() - self.lines.partition_point(ends_before),
+            Some(channel) => {
+                let lines = self.lines_within(channel);
+                let lines_before =
+                    lines.partition_point(|line| self.lines.get(*line).is_some_and(ends_before));
+                lines.len() - lines_before
+            }
+        };
+        u32::try_from(lines_after).unwrap_or(u32::MAX)
+    }
+
+    fn lines_within(&self, channel: &str) -> Ref<'_, [usize]> {
+        let is_current = self.narrowed.borrow().as_ref().is_some_and(|narrowed| {
             narrowed.channel == channel && narrowed.revision == self.revision
         });
         if !is_current {
@@ -194,22 +220,18 @@ impl ReplicaReader {
                 })
                 .map(|(index, _)| index)
                 .collect();
-            *narrowed = Some(Narrowed {
+            *self.narrowed.borrow_mut() = Some(Narrowed {
                 channel: channel.to_owned(),
                 revision: self.revision,
                 lines,
             });
         }
-        let lines = narrowed
-            .as_ref()
-            .map(|narrowed| narrowed.lines.as_slice())
-            .unwrap_or_default();
-        self.window_of(
-            lines.len(),
-            |index| lines.get(index).and_then(|line| self.lines.get(*line)),
-            start,
-            count,
-        )
+        Ref::map(self.narrowed.borrow(), |narrowed| {
+            narrowed
+                .as_ref()
+                .map(|narrowed| narrowed.lines.as_slice())
+                .unwrap_or_default()
+        })
     }
 
     fn window_of<'lines>(

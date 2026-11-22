@@ -4,7 +4,8 @@ mod tasks;
 
 use std::cmp::Reverse;
 use std::fmt;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -28,34 +29,34 @@ pub struct BoardIdentity {
 }
 
 const REPLICA_EXTENSION: &str = ".sqlite";
-const NEW_REPLICA_NAME: &str = "new";
 
-pub fn replica_file_for(
-    replicas_folder: &Path,
-    access: &BoardAccess,
-    identity: &BoardIdentity,
-) -> PathBuf {
+pub fn new_replica_file(replicas_folder: &Path, access: &BoardAccess) -> io::Result<PathBuf> {
+    fs::create_dir_all(replicas_folder)?;
     let address = file_name_part(access.url());
-    let created_at = file_name_part(&identity.oldest_created_at);
-    let id = file_name_part(&identity.oldest_id);
-    replicas_folder.join(format!("{address}.{created_at}.{id}{REPLICA_EXTENSION}"))
-}
-
-pub fn new_replica_file(replicas_folder: &Path, access: &BoardAccess) -> PathBuf {
-    let address = file_name_part(access.url());
-    replicas_folder.join(format!("{address}.{NEW_REPLICA_NAME}{REPLICA_EXTENSION}"))
+    let mut stamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|since_the_epoch| since_the_epoch.as_nanos())
+        .unwrap_or_default();
+    loop {
+        let file = replicas_folder.join(format!("{address}.{stamp}{REPLICA_EXTENSION}"));
+        match OpenOptions::new().write(true).create_new(true).open(&file) {
+            Ok(_) => return Ok(file),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                stamp = stamp.wrapping_add(1);
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 pub fn known_replica_files(replicas_folder: &Path, access: &BoardAccess) -> Vec<PathBuf> {
     let address_prefix = format!("{}.", file_name_part(access.url()));
-    let new_replica = new_replica_file(replicas_folder, access);
     let Ok(entries) = fs::read_dir(replicas_folder) else {
         return Vec::new();
     };
     let mut known: Vec<(SystemTime, PathBuf)> = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|file| *file != new_replica)
         .filter(|file| {
             file.file_name()
                 .and_then(|name| name.to_str())
@@ -451,11 +452,7 @@ impl Replica {
     ) -> Result<(), ReplicaError> {
         let transaction = self.connection.transaction()?;
         let new_messages = store_batch(&transaction, batch)?;
-        transaction.execute(
-            "INSERT INTO feed (only_row, cursor) VALUES (1, ?1)
-             ON CONFLICT (only_row) DO UPDATE SET cursor = excluded.cursor",
-            params![feed_cursor],
-        )?;
+        keep_feed_cursor(&transaction, feed_cursor)?;
         transaction.commit()?;
         self.message_count = self.message_count.saturating_add(new_messages);
         Ok(())
@@ -488,14 +485,23 @@ impl Replica {
         Ok(identity)
     }
 
-    pub fn keep_identity(&mut self, identity: &BoardIdentity) -> Result<(), ReplicaError> {
-        self.connection.execute(
-            "INSERT INTO board (only_row, oldest_id, oldest_created_at) VALUES (1, ?1, ?2)
-             ON CONFLICT (only_row) DO UPDATE SET
-                 oldest_id = excluded.oldest_id,
-                 oldest_created_at = excluded.oldest_created_at",
-            params![identity.oldest_id, identity.oldest_created_at],
-        )?;
+    pub fn finish_copy(
+        &mut self,
+        identity: Option<&BoardIdentity>,
+        feed_cursor: &str,
+    ) -> Result<(), ReplicaError> {
+        let transaction = self.connection.transaction()?;
+        if let Some(identity) = identity {
+            transaction.execute(
+                "INSERT INTO board (only_row, oldest_id, oldest_created_at) VALUES (1, ?1, ?2)
+                 ON CONFLICT (only_row) DO UPDATE SET
+                     oldest_id = excluded.oldest_id,
+                     oldest_created_at = excluded.oldest_created_at",
+                params![identity.oldest_id, identity.oldest_created_at],
+            )?;
+        }
+        keep_feed_cursor(&transaction, feed_cursor)?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -535,6 +541,15 @@ impl Replica {
     pub(crate) fn unseen_actors(&self, named_ids: &[String]) -> Result<Vec<String>, ReplicaError> {
         Ok(actors::unseen_actors(&self.connection, named_ids)?)
     }
+}
+
+fn keep_feed_cursor(transaction: &Transaction<'_>, feed_cursor: &str) -> Result<(), ReplicaError> {
+    transaction.execute(
+        "INSERT INTO feed (only_row, cursor) VALUES (1, ?1)
+         ON CONFLICT (only_row) DO UPDATE SET cursor = excluded.cursor",
+        params![feed_cursor],
+    )?;
+    Ok(())
 }
 
 fn store_batch(transaction: &Transaction<'_>, batch: &Batch) -> Result<u32, ReplicaError> {

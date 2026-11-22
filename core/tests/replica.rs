@@ -4,7 +4,7 @@ mod outdated;
 use blossom::BoardAccess;
 use blossom::replica::{
     Actor, Batch, BoardIdentity, Claim, Hold, MessageView, Replica, ReplicaError, Task, TaskEvent,
-    Via, known_replica_files, new_replica_file, replica_file_for,
+    Via, known_replica_files, new_replica_file,
 };
 use outdated::write_a_replica_from_before_task_events;
 use serde_json::{Value, json};
@@ -109,74 +109,70 @@ fn identity(oldest_id: &str, oldest_created_at: &str) -> BoardIdentity {
 }
 
 #[test]
-fn a_replica_file_is_named_after_the_boards_address_and_oldest_message() {
+fn each_new_replica_of_an_address_gets_a_file_of_its_own() {
     let folder = TempDir::new().unwrap();
+    let replicas_folder = folder.path().join("replicas");
     let port_4100 = BoardAccess::new("http://127.0.0.1:4100/api/board", "token-a");
-    let port_4200 = BoardAccess::new("http://127.0.0.1:4200/api/board", "token-b");
-    let first_project = identity("10", "2026-11-20T10:00:00.000Z");
-    let second_project = identity("10", "2026-11-20T10:40:00.000Z");
 
-    let file = replica_file_for(folder.path(), &port_4100, &first_project);
+    let first = new_replica_file(&replicas_folder, &port_4100).unwrap();
+    let second = new_replica_file(&replicas_folder, &port_4100).unwrap();
 
-    assert_eq!(file.parent(), Some(folder.path()));
-    assert_eq!(
-        file,
-        replica_file_for(folder.path(), &port_4100, &first_project)
-    );
-    assert_ne!(
-        file,
-        replica_file_for(folder.path(), &port_4100, &second_project)
-    );
-    assert_ne!(
-        file,
-        replica_file_for(folder.path(), &port_4200, &first_project)
-    );
-    assert_ne!(file, new_replica_file(folder.path(), &port_4100));
+    assert_ne!(first, second);
+    assert_eq!(first.parent(), Some(replicas_folder.as_path()));
+    assert!(first.exists());
+    assert!(second.exists());
 }
 
 #[test]
-fn the_known_replicas_of_an_address_are_its_finished_copies_only() {
+fn the_known_replicas_of_an_address_are_every_replica_made_for_it() {
     let folder = TempDir::new().unwrap();
     let port_4100 = BoardAccess::new("http://127.0.0.1:4100/api/board", "token-a");
     let port_4200 = BoardAccess::new("http://127.0.0.1:4200/api/board", "token-b");
-    let first_project = identity("10", "2026-11-20T10:00:00.000Z");
-    let second_project = identity("10", "2026-11-20T10:40:00.000Z");
-    for file in [
-        replica_file_for(folder.path(), &port_4100, &first_project),
-        replica_file_for(folder.path(), &port_4100, &second_project),
-        replica_file_for(folder.path(), &port_4200, &first_project),
-        new_replica_file(folder.path(), &port_4100),
-    ] {
-        Replica::open(&file).unwrap();
-    }
+    let first_at_4100 = new_replica_file(folder.path(), &port_4100).unwrap();
+    let second_at_4100 = new_replica_file(folder.path(), &port_4100).unwrap();
+    new_replica_file(folder.path(), &port_4200).unwrap();
 
     let mut known = known_replica_files(folder.path(), &port_4100);
     known.sort();
 
-    let mut expected = vec![
-        replica_file_for(folder.path(), &port_4100, &first_project),
-        replica_file_for(folder.path(), &port_4100, &second_project),
-    ];
+    let mut expected = vec![first_at_4100, second_at_4100];
     expected.sort();
     assert_eq!(known, expected);
 }
 
 #[test]
-fn the_boards_identity_is_kept_across_reopening() {
+fn a_replica_is_whole_only_once_its_copy_is_finished() {
     let folder = TempDir::new().unwrap();
     let file = folder.path().join("board.sqlite");
     let mut replica = Replica::open(&file).unwrap();
-    assert_eq!(replica.identity().unwrap(), None);
+    replica
+        .apply(&views(vec![view("10", 1, "deploy www").unwrap()]))
+        .unwrap();
+    assert_eq!(replica.feed_cursor().unwrap(), None);
 
     replica
-        .keep_identity(&identity("10", "2026-11-20T10:00:00.000Z"))
+        .finish_copy(Some(&identity("10", "2026-11-20T10:00:00.000Z")), "815")
         .unwrap();
     drop(replica);
+    let reopened = Replica::open(&file).unwrap();
 
     assert_eq!(
-        Replica::open(&file).unwrap().identity().unwrap(),
+        reopened.identity().unwrap(),
         Some(identity("10", "2026-11-20T10:00:00.000Z"))
     );
+    assert_eq!(reopened.feed_cursor().unwrap(), Some(String::from("815")));
+}
+
+#[test]
+fn a_copy_of_an_empty_board_is_whole_with_no_identity() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+
+    replica.finish_copy(None, "0").unwrap();
+
+    assert_eq!(replica.feed_cursor().unwrap(), Some(String::from("0")));
+    assert_eq!(replica.identity().unwrap(), None);
 }
 
 #[test]
