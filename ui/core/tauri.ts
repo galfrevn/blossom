@@ -46,5 +46,6 @@ export function createTauriCore(): Core {
     readThread: (messageId) =>
       invoke<Thread | null>("read_thread", { messageId }),
     search: (query) => invoke<SearchResults>("search", { query }),
+    openLink: (link) => invoke<void>("open_link", { link }),
   };
 }

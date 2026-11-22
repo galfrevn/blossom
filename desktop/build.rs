@@ -12,6 +12,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "read_flow",
         "read_thread",
         "search",
+        "open_link",
     ]);
     tauri_build::try_build(Attributes::new().app_manifest(app_manifest))?;
     Ok(())

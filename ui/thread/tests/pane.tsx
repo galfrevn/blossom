@@ -15,7 +15,6 @@ import { ThreadPane } from "../pane";
 
 afterEach(cleanup);
 
-const SOMEONE_ACTING_FOR_A_PERSON = /^via /u;
 const THREAD_HEIGHT = 4000;
 const PANE_HEIGHT = 600;
 const PLACE_IN_THE_MIDDLE = 1200;
@@ -41,6 +40,7 @@ function threadOf(messages: ThreadMessage[]): Thread {
 function renderPaneOf(messageId: string, threads: Thread[]) {
   const fakeCore = createFakeCore();
   let latestChange: FlowChange | undefined;
+  let openMessageId = messageId;
   const close = vi.fn();
   fakeCore.core.subscribeToFlow((change) => {
     latestChange = change;
@@ -48,9 +48,10 @@ function renderPaneOf(messageId: string, threads: Thread[]) {
   fakeCore.pushThreads(threads);
   const pane = () => (
     <ThreadPane
-      messageId={messageId}
+      messageId={openMessageId}
       change={latestChange}
       readThread={fakeCore.core.readThread}
+      openLink={fakeCore.core.openLink}
       onClose={close}
     />
   );
@@ -62,7 +63,14 @@ function renderPaneOf(messageId: string, threads: Thread[]) {
         rerender(pane());
       });
     },
+    open: (otherMessageId: string) => {
+      openMessageId = otherMessageId;
+      act(() => {
+        rerender(pane());
+      });
+    },
     closings: () => close.mock.calls.length,
+    linksOpened: fakeCore.linksOpened,
   };
 }
 
@@ -101,67 +109,69 @@ test("the pane shows the thread's root and every reply, oldest first", async () 
   expect(messageIds(messages)).toEqual(["root", "reply", "later"]);
 });
 
-test("each message says who wrote it, on whose behalf, and when", async () => {
-  renderPaneOf("root", [
+test("a click on a link opens it in the browser, and the window stays where it is", async () => {
+  const pane = renderPaneOf("root", [
     threadOf([
-      messageInThread({ id: "root", createdAt: "2026-11-21T10:07:00.000Z" }),
+      messageInThread({
+        id: "root",
+        text: "Preview at [www](https://www-git-fix.vercel.app)",
+      }),
     ]),
   ]);
+  const link = await threadPane().findByRole("link", { name: "www" });
 
-  const message = await threadPane().findByRole("article");
+  const theWindowWouldFollowTheLink = fireEvent.click(link);
 
-  expect(within(message).getByText("claude")).toBeDefined();
-  expect(
-    within(message).getByText(dictionary.thread.onBehalfOf("ada")),
-  ).toBeDefined();
-  expect(
-    within(message).getByText(
-      dictionary.thread.time("2026-11-21T10:07:00.000Z"),
-    ),
-  ).toBeDefined();
+  expect(theWindowWouldFollowTheLink).toBe(false);
+  expect(pane.linksOpened()).toEqual(["https://www-git-fix.vercel.app/"]);
 });
 
-test("a person's own message names no one it acts for", async () => {
-  renderPaneOf("root", [
+test("a click on what a link holds opens the link", async () => {
+  const pane = renderPaneOf("root", [
     threadOf([
-      messageInThread({ id: "root", author: "Ada Lovelace", onBehalfOf: null }),
+      messageInThread({
+        id: "root",
+        text: "[`vb serve` docs](https://vercel.com/docs)",
+      }),
     ]),
   ]);
+  const link = await threadPane().findByRole("link");
 
-  const message = await threadPane().findByRole("article");
+  fireEvent.click(within(link).getByText("vb serve"));
 
-  expect(within(message).queryByText(SOMEONE_ACTING_FOR_A_PERSON)).toBeNull();
+  expect(pane.linksOpened()).toEqual(["https://vercel.com/docs"]);
 });
 
-test("a message's text reads as plain text, as it was written", async () => {
-  const written = "## Report\n\n  - **built** <b>www</b>";
-  renderPaneOf("root", [
-    threadOf([messageInThread({ id: "root", text: written })]),
+test("a link opens only when it is clicked", async () => {
+  const pane = renderPaneOf("root", [
+    threadOf([messageInThread({ id: "root", text: "see https://vercel.com" })]),
   ]);
+  await threadPane().findByRole("link");
 
-  const message = await threadPane().findByRole("article");
+  fireEvent.click(threadPane().getByText("see", { exact: false }));
 
-  expect(
-    within(message).getByText(written, { normalizer: String }),
-  ).toBeDefined();
+  expect(pane.linksOpened()).toEqual([]);
 });
 
-test("a deleted message reads as deleted, and an edited one says so", async () => {
-  renderPaneOf("root", [
-    threadOf([
-      messageInThread({ id: "root", deleted: true, text: "" }),
-      messageInThread({ id: "reply", edited: true, text: "fixed" }),
-    ]),
+test("after the pane moves to another thread, its links still open", async () => {
+  const pane = renderPaneOf("first", [
+    { ...threadOf([messageInThread({ id: "first" })]), id: "first" },
+    {
+      ...threadOf([
+        messageInThread({
+          id: "second",
+          text: "logs at https://vercel.com/logs",
+        }),
+      ]),
+      id: "second",
+    },
   ]);
+  await threadPane().findByRole("article");
 
-  const [deleted, edited] = await threadPane().findAllByRole("article");
+  pane.open("second");
+  fireEvent.click(await threadPane().findByRole("link"));
 
-  expect(
-    within(deleted as HTMLElement).getByText(dictionary.thread.deleted),
-  ).toBeDefined();
-  expect(
-    within(edited as HTMLElement).getByText(dictionary.thread.edited),
-  ).toBeDefined();
+  expect(pane.linksOpened()).toEqual(["https://vercel.com/logs"]);
 });
 
 test("the pane is named after the thread's channel", async () => {

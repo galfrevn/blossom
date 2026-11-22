@@ -58,6 +58,7 @@ export type FakeCore = {
   pushThreads: (threads: Thread[]) => void;
   pushFleet: (agents: Agent[]) => void;
   answerSearch: (query: string, results: SearchResults) => void;
+  linksOpened: () => string[];
 };
 
 export function createFakeCore(): FakeCore {
@@ -74,6 +75,7 @@ export function createFakeCore(): FakeCore {
     flow.push({ revision: flowRevision });
   };
   const searchAnswers = new Map<string, SearchResults>();
+  const linksOpened: string[] = [];
   return {
     core: {
       subscribeToOpenBoard: openBoard.subscribe,
@@ -95,6 +97,10 @@ export function createFakeCore(): FakeCore {
         Promise.resolve(threadHolding(threads, messageId)),
       search: (query) =>
         Promise.resolve(searchAnswers.get(query) ?? noSearchResults()),
+      openLink: (link) => {
+        linksOpened.push(link);
+        return Promise.resolve();
+      },
     },
     pushOpenBoard: openBoard.push,
     pushReplicaState: replica.push,
@@ -111,5 +117,6 @@ export function createFakeCore(): FakeCore {
     answerSearch: (query, results) => {
       searchAnswers.set(query, results);
     },
+    linksOpened: () => [...linksOpened],
   };
 }

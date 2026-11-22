@@ -1,4 +1,12 @@
+mod link;
+mod navigation;
 mod rate;
+
+#[cfg(test)]
+mod tests {
+    mod link;
+    mod navigation;
+}
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -274,6 +282,20 @@ fn read_thread(
 }
 
 #[tauri::command]
+async fn open_link(link: String) -> Result<(), String> {
+    let Some(url) = link::link_to_open(&link) else {
+        return Err(format!("{link} is not a web or mail link"));
+    };
+    let opening =
+        tauri::async_runtime::spawn_blocking(move || link::open_in_the_default_browser(&url));
+    match opening.await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(format!("{link} could not be opened: {error}")),
+        Err(error) => Err(format!("{link} could not be opened: {error}")),
+    }
+}
+
+#[tauri::command]
 fn subscribe_to_channels(channel: Channel<Vec<String>>, session: State<'_, Arc<Session>>) {
     let receiver = session.channels.subscribe();
     let forwarding = tauri::async_runtime::spawn(forward(channel, receiver));
@@ -346,6 +368,7 @@ fn send<Value: IpcResponse>(channel: &Channel<Value>, value: Value) -> bool {
 
 fn main() -> ExitCode {
     let application = tauri::Builder::default()
+        .plugin(navigation::keeping_the_window_on_its_page())
         .setup(|application| {
             let replicas_folder = application
                 .path()
@@ -368,7 +391,8 @@ fn main() -> ExitCode {
             subscribe_to_fleet,
             read_flow,
             read_thread,
-            search
+            search,
+            open_link
         ])
         .on_page_load(|webview, payload| {
             if payload.event() != PageLoadEvent::Finished {

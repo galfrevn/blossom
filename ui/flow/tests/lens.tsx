@@ -73,6 +73,7 @@ function renderFlowLensOf(rows: FlowRow[]) {
       onWiden={vi.fn()}
       readFlow={fakeCore.core.readFlow}
       readThread={fakeCore.core.readThread}
+      openLink={fakeCore.core.openLink}
     />,
   );
 }

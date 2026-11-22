@@ -31,7 +31,7 @@ These are targets. The spikes measured them in November 2026; the numbers are in
 | --- | --- | --- |
 | Desktop installer | 4.6 MB | holds |
 | Idle memory, with a large board loaded | 116 MB | holds |
-| The UI's JavaScript, compressed | 70 KB | holds |
+| The UI's JavaScript, compressed | 93 KB, 17 of them markdown (Thread 02) | holds |
 | Cold start to a usable screen | 310 to 340 ms | missed: Tauri's own start takes about 170 ms, and the page's script about 110 |
 | Any interaction | 17 to 33 ms | holds |
 | A list of 100,000 messages | 120 fps, with WebKit's 60 fps cap lifted (ADR 0023), and no blank rows | holds |

@@ -20,6 +20,7 @@ export function Application({
   flowStore,
   readFlow,
   readThread,
+  openLink,
 }: {
   openBoardStore: Store<OpenBoard>;
   replicaStore: Store<ReplicaState>;
@@ -31,6 +32,7 @@ export function Application({
     count: number,
   ) => Promise<FlowWindow>;
   readThread: (messageId: string) => Promise<Thread | null>;
+  openLink: (link: string) => Promise<void>;
 }) {
   const openBoard = useStore(openBoardStore);
   const replicaState = useStore(replicaStore);
@@ -69,6 +71,7 @@ export function Application({
             onWiden={showTheWholeBoard}
             readFlow={readFlow}
             readThread={readThread}
+            openLink={openLink}
           />
         </div>
       )}

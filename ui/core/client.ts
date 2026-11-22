@@ -25,4 +25,5 @@ export type Core = {
   ) => Promise<FlowWindow>;
   readThread: (messageId: string) => Promise<Thread | null>;
   search: (query: string) => Promise<SearchResults>;
+  openLink: (link: string) => Promise<void>;
 };

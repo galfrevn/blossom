@@ -8,6 +8,7 @@ type ThreadPaneProps = {
   messageId: string;
   change: FlowChange | undefined;
   readThread: (messageId: string) => Promise<Thread | null>;
+  openLink: (link: string) => Promise<void>;
   onClose: () => void;
 };
 
@@ -17,6 +18,7 @@ type ThreadRead = {
 };
 
 type PaneBody = React.RefObject<HTMLDivElement | null>;
+type PaneElement = React.RefObject<HTMLElement | null>;
 
 function isAtTheEnd(body: HTMLElement | null): boolean {
   if (body === null) {
@@ -90,6 +92,40 @@ function useClosingOnEscape(onClose: () => void) {
   }, [onClose]);
 }
 
+function linkClicked(event: MouseEvent): string | undefined {
+  if (!(event.target instanceof Element)) {
+    return undefined;
+  }
+  const anchor = event.target.closest("a[href]");
+  return anchor?.getAttribute("href") ?? undefined;
+}
+
+function useOpeningLinksInTheBrowser(
+  pane: PaneElement,
+  openLink: (link: string) => Promise<void>,
+) {
+  useEffect(() => {
+    const element = pane.current;
+    if (element === null) {
+      return;
+    }
+    const openTheClickedLink = (event: MouseEvent) => {
+      const link = linkClicked(event);
+      if (link === undefined) {
+        return;
+      }
+      event.preventDefault();
+      openLink(link).catch((error: unknown) => {
+        console.error("blossom: a link could not be opened", error);
+      });
+    };
+    element.addEventListener("click", openTheClickedLink);
+    return () => {
+      element.removeEventListener("click", openTheClickedLink);
+    };
+  }, [pane, openLink]);
+}
+
 function headingOf(read: ThreadRead | undefined): string {
   if (read === undefined) {
     return dictionary.thread.title;
@@ -124,13 +160,16 @@ function CloseButton({ onClose }: { onClose: () => void }) {
 }
 
 export function ThreadPane(props: ThreadPaneProps) {
+  const pane = useRef<HTMLElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const headingId = useId();
   const read = useThreadOf(props, body);
   useKeepingToTheEnd(body, read);
   useClosingOnEscape(props.onClose);
+  useOpeningLinksInTheBrowser(pane, props.openLink);
   return (
     <aside
+      ref={pane}
       aria-labelledby={headingId}
       className="flex min-h-0 w-[min(380px,36vw)] shrink-0 flex-col border-line border-l bg-raised"
     >

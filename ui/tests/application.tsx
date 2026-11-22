@@ -54,6 +54,7 @@ function renderApplicationWhileTheCoreSays(said: {
       flowStore={flowStore}
       readFlow={fakeCore.core.readFlow}
       readThread={fakeCore.core.readThread}
+      openLink={fakeCore.core.openLink}
     />,
   );
   return fakeCore;

@@ -37,6 +37,7 @@ createRoot(rootElement).render(
       flowStore={flowStore}
       readFlow={core.readFlow}
       readThread={core.readThread}
+      openLink={core.openLink}
     />
   </StrictMode>,
 );

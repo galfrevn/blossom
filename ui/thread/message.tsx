@@ -1,12 +1,13 @@
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import type { ThreadMessage } from "../core/contract";
 import { dictionary } from "../dictionary";
+import { elementsOfMarkdown } from "../markdown/blocks";
 
-function textOf(message: ThreadMessage): string {
+function bodyOf(message: ThreadMessage): ReactNode {
   if (message.deleted) {
     return dictionary.thread.deleted;
   }
-  return message.text;
+  return elementsOfMarkdown(message.text);
 }
 
 function OnBehalfOf({ person }: { person: string | null }) {
@@ -44,9 +45,9 @@ function MessageOfTheThread({ message }: { message: ThreadMessage }) {
           {dictionary.thread.time(message.createdAt)}
         </time>
       </header>
-      <p className="whitespace-pre-wrap text-ink-2 [overflow-wrap:anywhere]">
-        {textOf(message)}
-      </p>
+      <div className="flex flex-col gap-1 text-ink-2 [overflow-wrap:anywhere]">
+        {bodyOf(message)}
+      </div>
     </article>
   );
 }

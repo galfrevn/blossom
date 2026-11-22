@@ -9,11 +9,13 @@ function OpenThread({
   messageId,
   change,
   readThread,
+  openLink,
   onClose,
 }: {
   messageId: string | undefined;
   change: FlowChange | undefined;
   readThread: (messageId: string) => Promise<Thread | null>;
+  openLink: (link: string) => Promise<void>;
   onClose: () => void;
 }) {
   if (messageId === undefined) {
@@ -24,6 +26,7 @@ function OpenThread({
       messageId={messageId}
       change={change}
       readThread={readThread}
+      openLink={openLink}
       onClose={onClose}
     />
   );
@@ -36,6 +39,7 @@ export function FlowLens({
   onWiden,
   readFlow,
   readThread,
+  openLink,
 }: {
   change: FlowChange | undefined;
   channel: string | null;
@@ -47,6 +51,7 @@ export function FlowLens({
     count: number,
   ) => Promise<FlowWindow>;
   readThread: (messageId: string) => Promise<Thread | null>;
+  openLink: (link: string) => Promise<void>;
 }) {
   const [selectedMessage, setSelectedMessage] = useState<string>();
   const closeTheThread = useCallback(() => {
@@ -75,6 +80,7 @@ export function FlowLens({
         messageId={selectedMessage}
         change={change}
         readThread={readThread}
+        openLink={openLink}
         onClose={closeTheThread}
       />
     </>
