@@ -7,6 +7,7 @@ use serde_json::Value;
 use super::actors::{Actor, AuthorKeys};
 
 pub(crate) const TASK_EVENT_PREFIX: &str = "task.";
+const RENEWAL: &str = "task.renewed";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Task {
@@ -21,7 +22,7 @@ pub struct Task {
     pub blocked: Option<Hold>,
     pub result: Option<String>,
     pub reason: Option<String>,
-    pub latest_event_at: Option<String>,
+    pub changed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -142,6 +143,10 @@ impl TaskEvent {
             .into_iter()
             .flatten()
     }
+
+    fn counts_as_a_change(&self) -> bool {
+        self.event_type != RENEWAL
+    }
 }
 
 fn needs_as_json(needs: &[String]) -> String {
@@ -166,11 +171,11 @@ pub(super) fn keep_root_task(
     let mut keep_newest_task = transaction.prepare_cached(
         "INSERT INTO tasks (
              id, channel, state, owner, made_as, assigned_to, claim_actor, claim_until, needs,
-             blocked_kind, blocked_reason, result, reason, title, latest_event_at
+             blocked_kind, blocked_reason, result, reason, title, changed_at
          )
          VALUES (
              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-             (SELECT max(created_at) FROM task_events WHERE task = ?1)
+             (SELECT max(created_at) FROM task_events WHERE task = ?1 AND event_type <> ?15)
          )
          ON CONFLICT (id) DO UPDATE SET
              channel = excluded.channel,
@@ -205,7 +210,8 @@ pub(super) fn keep_root_task(
         blocked_reason,
         task.result,
         task.reason,
-        task.title
+        task.title,
+        RENEWAL
     ])?;
     Ok(())
 }
@@ -222,9 +228,9 @@ pub(super) fn keep_task_events(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
          ON CONFLICT (cursor) DO NOTHING",
     )?;
-    let mut move_the_latest_event_time = transaction.prepare_cached(
-        "UPDATE tasks SET latest_event_at = ?2
-         WHERE id = ?1 AND (latest_event_at IS NULL OR latest_event_at < ?2)",
+    let mut move_the_time_of_the_last_change = transaction.prepare_cached(
+        "UPDATE tasks SET changed_at = ?2
+         WHERE id = ?1 AND (changed_at IS NULL OR changed_at < ?2)",
     )?;
     for event in events {
         let needs = event.needs.as_deref().map(needs_as_json);
@@ -240,8 +246,8 @@ pub(super) fn keep_task_events(
             needs,
             event.payload.to_string()
         ])? == 1;
-        if kept_for_the_first_time {
-            move_the_latest_event_time.execute(params![event.task, event.created_at])?;
+        if kept_for_the_first_time && event.counts_as_a_change() {
+            move_the_time_of_the_last_change.execute(params![event.task, event.created_at])?;
         }
     }
     Ok(())
@@ -272,7 +278,7 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         blocked,
         result: row.get(11)?,
         reason: row.get(12)?,
-        latest_event_at: row.get(13)?,
+        changed_at: row.get(13)?,
     })
 }
 
@@ -280,7 +286,7 @@ pub(super) fn task(connection: &Connection, id: &str) -> rusqlite::Result<Option
     connection
         .prepare_cached(
             "SELECT id, channel, state, owner, made_as, assigned_to, claim_actor, claim_until,
-                    needs, blocked_kind, blocked_reason, result, reason, latest_event_at
+                    needs, blocked_kind, blocked_reason, result, reason, changed_at
              FROM tasks WHERE id = ?1",
         )?
         .query_row(params![id], task_from_row)

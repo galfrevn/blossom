@@ -24,7 +24,7 @@ const ORDERED_TASK_COLUMNS: &str = "tasks.id,
      tasks.state,
      tasks.channel,
      tasks.title,
-     coalesce(tasks.latest_event_at, messages.created_at, '')";
+     coalesce(tasks.changed_at, messages.created_at, '')";
 
 const ROW_OF_A_TASK: &str = "SELECT tasks.title,
         tasks.channel,

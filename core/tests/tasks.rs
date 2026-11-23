@@ -93,6 +93,25 @@ fn event(
     })
 }
 
+fn claimed_by(made: &Value, version: u64, actor: &str, until_minute: u32) -> Value {
+    let mut claimed = newer(made, version);
+    claimed["task"]["state"] = Value::from("claimed");
+    claimed["task"]["claim"] = json!({ "actor": actor, "until": time_at(until_minute) });
+    claimed
+}
+
+fn lease_event(
+    cursor: &str,
+    event_type: &str,
+    minute: u32,
+    actor: (&str, Value),
+    until_minute: u32,
+    message: &Value,
+) -> Value {
+    let payload = json!({ "epoch": 1, "until": time_at(until_minute) });
+    event(cursor, event_type, minute, actor, payload, message)
+}
+
 fn store_roots(replica: &mut Replica, roots: &[Value]) -> Result<(), Box<dyn Error>> {
     let views = roots
         .iter()
@@ -423,18 +442,16 @@ fn a_claimed_task_says_who_owns_it_where_and_who_holds_it_for_how_long() {
     let folder = TempDir::new().unwrap();
     let (mut replica, file) = replica_in(&folder).unwrap();
     let made = root("812", "fleet/www", 0, "fix CVE-123", task_in("ready"));
-    let mut claimed = newer(&made, 2);
-    claimed["task"]["state"] = Value::from("claimed");
-    claimed["task"]["claim"] = json!({ "actor": CLAUDE, "until": time_at(20) });
-    store_roots(&mut replica, &[made]).unwrap();
+    let claimed = claimed_by(&made, 2, CLAUDE, 20);
+    store_roots(&mut replica, std::slice::from_ref(&made)).unwrap();
     store_events(
         &mut replica,
-        &[event(
+        &[lease_event(
             "event-1",
             "task.claimed",
             5,
             (CLAUDE, agent_named("claude")),
-            json!({ "until": time_at(20) }),
+            20,
             &claimed,
         )],
     )
@@ -583,6 +600,101 @@ fn a_task_that_changes_moves_to_its_place_once_the_reader_catches_up() {
     );
     assert!(reader.task_counts_in(None).contains(&count("blocked", 1)));
     assert!(!reader.catch_up_tasks().unwrap());
+}
+
+fn two_claimed_tasks(replica: &mut Replica) -> Result<Value, Box<dyn Error>> {
+    let renewing = root("renewing", "work", 0, "renewing", task_in("ready"));
+    let changed = root("changed", "work", 0, "changed", task_in("ready"));
+    store_roots(replica, &[renewing.clone(), changed.clone()])?;
+    store_events(
+        replica,
+        &[
+            lease_event(
+                "event-1",
+                "task.claimed",
+                2,
+                (CLAUDE, agent_named("claude")),
+                10,
+                &claimed_by(&renewing, 2, CLAUDE, 10),
+            ),
+            lease_event(
+                "event-2",
+                "task.claimed",
+                3,
+                (CODEX, agent_named("codex")),
+                11,
+                &claimed_by(&changed, 2, CODEX, 11),
+            ),
+        ],
+    )?;
+    Ok(renewing)
+}
+
+#[test]
+fn a_renewal_moves_the_lease_and_keeps_the_tasks_place_and_last_change() {
+    let folder = TempDir::new().unwrap();
+    let (mut replica, file) = replica_in(&folder).unwrap();
+    let renewing = two_claimed_tasks(&mut replica).unwrap();
+    let mut reader = reader_of(&file).unwrap();
+
+    store_events(
+        &mut replica,
+        &[lease_event(
+            "event-3",
+            "task.renewed",
+            8,
+            (CLAUDE, agent_named("claude")),
+            18,
+            &claimed_by(&renewing, 3, CLAUDE, 18),
+        )],
+    )
+    .unwrap();
+    let caught_up = reader.catch_up_tasks().unwrap();
+
+    assert!(caught_up);
+    let renewed = only_row(&reader, "renewing").unwrap().unwrap();
+    assert_eq!(
+        all_ids(&reader, &everything()).unwrap(),
+        vec!["changed", "renewing"]
+    );
+    assert_eq!(renewed.changed_at, time_at(2));
+    assert_eq!(
+        renewed.lease,
+        Some(Lease {
+            since: Some(time_at(8)),
+            until: time_at(18),
+        })
+    );
+}
+
+#[test]
+fn a_reader_opened_after_a_renewal_keeps_the_tasks_place_and_last_change() {
+    let folder = TempDir::new().unwrap();
+    let (mut replica, file) = replica_in(&folder).unwrap();
+    let renewing = two_claimed_tasks(&mut replica).unwrap();
+    store_events(
+        &mut replica,
+        &[lease_event(
+            "event-3",
+            "task.renewed",
+            8,
+            (CLAUDE, agent_named("claude")),
+            18,
+            &claimed_by(&renewing, 3, CLAUDE, 18),
+        )],
+    )
+    .unwrap();
+
+    let reader = reader_of(&file).unwrap();
+
+    assert_eq!(
+        all_ids(&reader, &everything()).unwrap(),
+        vec!["changed", "renewing"]
+    );
+    assert_eq!(
+        only_row(&reader, "renewing").unwrap().unwrap().changed_at,
+        time_at(2)
+    );
 }
 
 #[test]

@@ -513,7 +513,7 @@ fn the_task_index_holds_the_task_its_root_carries() {
             blocked: None,
             result: None,
             reason: None,
-            latest_event_at: None,
+            changed_at: None,
         })
     );
 }
@@ -614,7 +614,7 @@ fn a_message_that_is_not_a_task_has_no_row_in_the_task_index() {
 }
 
 #[test]
-fn the_task_index_has_the_time_of_the_tasks_latest_event_whatever_order_events_arrive_in() {
+fn the_task_index_has_the_time_of_the_tasks_last_change_whatever_order_events_arrive_in() {
     let folder = TempDir::new().unwrap();
     let mut replica = open_replica_in(&folder).unwrap();
     let created = event_by_claude(
@@ -637,14 +637,11 @@ fn the_task_index_has_the_time_of_the_tasks_latest_event_whatever_order_events_a
 
     let task = replica.task("812").unwrap().unwrap();
     assert_eq!(task.state, "claimed");
-    assert_eq!(
-        task.latest_event_at.as_deref(),
-        Some("2026-11-20T10:03:00.000Z")
-    );
+    assert_eq!(task.changed_at.as_deref(), Some("2026-11-20T10:03:00.000Z"));
 }
 
 #[test]
-fn the_time_of_a_tasks_latest_event_is_kept_when_its_root_arrives_after_it() {
+fn the_time_of_a_tasks_last_change_is_kept_when_its_root_arrives_after_it() {
     let folder = TempDir::new().unwrap();
     let mut replica = open_replica_in(&folder).unwrap();
     let claimed_with_no_message = json!({
@@ -665,12 +662,89 @@ fn the_time_of_a_tasks_latest_event_is_kept_when_its_root_arrives_after_it() {
         .unwrap();
 
     assert_eq!(
-        replica
-            .task("812")
-            .unwrap()
-            .unwrap()
-            .latest_event_at
-            .as_deref(),
+        replica.task("812").unwrap().unwrap().changed_at.as_deref(),
+        Some("2026-11-20T10:03:00.000Z")
+    );
+}
+
+fn claimed_by_claude_until(until: &str) -> Value {
+    let mut claimed = task_in_state("claimed");
+    claimed["claim"] = json!({ "actor": CLAUDE, "until": until });
+    claimed
+}
+
+fn lease_payload(until: &str) -> Value {
+    json!({ "id": "812", "thread": "thread-of-812", "epoch": 1, "until": until, "by": by_claude() })
+}
+
+fn claim_then_renewal() -> [Value; 2] {
+    let claimed = event_by_claude(
+        "814",
+        "task.claimed",
+        "2026-11-20T10:03:00.000Z",
+        lease_payload("2026-11-20T10:08:00.000Z"),
+        task_root(
+            "812",
+            814,
+            claimed_by_claude_until("2026-11-20T10:08:00.000Z"),
+        ),
+    );
+    let renewed = event_by_claude(
+        "815",
+        "task.renewed",
+        "2026-11-20T10:06:00.000Z",
+        lease_payload("2026-11-20T10:11:00.000Z"),
+        task_root(
+            "812",
+            815,
+            claimed_by_claude_until("2026-11-20T10:11:00.000Z"),
+        ),
+    );
+    [claimed, renewed]
+}
+
+#[test]
+fn a_renewal_moves_the_claim_but_not_the_time_of_the_tasks_last_change() {
+    let folder = TempDir::new().unwrap();
+    let mut replica = open_replica_in(&folder).unwrap();
+    let [claimed, renewed] = claim_then_renewal();
+
+    replica.apply(&batch_of(&[claimed]).unwrap()).unwrap();
+    replica.apply(&batch_of(&[renewed]).unwrap()).unwrap();
+
+    let task = replica.task("812").unwrap().unwrap();
+    assert_eq!(
+        task.claim.map(|claim| claim.until).as_deref(),
+        Some("2026-11-20T10:11:00.000Z")
+    );
+    assert_eq!(task.changed_at.as_deref(), Some("2026-11-20T10:03:00.000Z"));
+}
+
+#[test]
+fn a_renewal_is_not_the_tasks_last_change_when_its_root_arrives_after_it() {
+    let folder = TempDir::new().unwrap();
+    let mut replica = open_replica_in(&folder).unwrap();
+    let events_with_no_message = claim_then_renewal().map(|mut event| {
+        event.as_object_mut().map(|event| event.remove("message"));
+        event
+    });
+
+    replica
+        .apply(&batch_of(&events_with_no_message).unwrap())
+        .unwrap();
+    replica
+        .apply(&views(vec![
+            task_root_view(
+                "812",
+                815,
+                claimed_by_claude_until("2026-11-20T10:11:00.000Z"),
+            )
+            .unwrap(),
+        ]))
+        .unwrap();
+
+    assert_eq!(
+        replica.task("812").unwrap().unwrap().changed_at.as_deref(),
         Some("2026-11-20T10:03:00.000Z")
     );
 }

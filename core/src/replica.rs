@@ -214,7 +214,7 @@ impl From<rusqlite::Error> for ReplicaError {
 
 const WAIT_FOR_ANOTHER_CONNECTION: Duration = Duration::from_secs(2);
 
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 const SCHEMA: &str = "
     CREATE TABLE messages (
@@ -271,7 +271,7 @@ const SCHEMA: &str = "
         blocked_reason TEXT,
         result TEXT,
         reason TEXT,
-        latest_event_at TEXT
+        changed_at TEXT
     ) WITHOUT ROWID;
     CREATE INDEX tasks_by_claim ON tasks (claim_actor, claim_until);
     CREATE TABLE task_changes (

@@ -1051,7 +1051,7 @@ async fn the_task_index_is_copied_as_each_task_stands_now() {
         Some("fixed in a1b2c3, tests pass")
     );
     assert_eq!(fixing.claim, None);
-    assert_eq!(fixing.latest_event_at, Some(time_at(12)));
+    assert_eq!(fixing.changed_at, Some(time_at(12)));
     assert_eq!(reviewing.state, "claimed");
     assert_eq!(
         reviewing.claim,
@@ -1071,7 +1071,7 @@ async fn the_task_index_is_copied_as_each_task_stands_now() {
         Some(DEPLOYER_NO_ONE_LISTS)
     );
     assert_eq!(deploying.needs, vec![String::from("11")]);
-    assert_eq!(deploying.latest_event_at, Some(time_at(26)));
+    assert_eq!(deploying.changed_at, Some(time_at(26)));
 }
 
 #[tokio::test]
@@ -1160,7 +1160,7 @@ async fn task_changes_while_followed_reach_the_replica() {
     assert_eq!(reviewing.state, "completed");
     assert_eq!(reviewing.claim, None);
     assert_eq!(reviewing.result.as_deref(), Some("reviewed, looks good"));
-    assert_eq!(reviewing.latest_event_at, Some(time_at(30)));
+    assert_eq!(reviewing.changed_at, Some(time_at(30)));
     assert_eq!(
         changes_of(&replica, "11").unwrap().last(),
         Some(&change("task.completed", Some(&claude()), 30))
