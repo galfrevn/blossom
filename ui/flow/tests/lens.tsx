@@ -16,6 +16,7 @@ import type {
 } from "../../core/contract";
 import { createFakeCore } from "../../core/fake";
 import { dictionary } from "../../dictionary";
+import { createThreadOpenings } from "../../thread/openings";
 import { FlowLens } from "../lens";
 import { ESTIMATED_ROW_HEIGHT } from "../state";
 
@@ -65,6 +66,7 @@ function renderFlowLensOf(rows: FlowRow[]) {
   });
   fakeCore.pushFlow(rows);
   fakeCore.pushThreads(rows.map(threadOfItsOwn));
+  const threadOpenings = createThreadOpenings();
   render(
     <FlowLens
       change={latestChange}
@@ -76,8 +78,10 @@ function renderFlowLensOf(rows: FlowRow[]) {
       countFlowAfter={fakeCore.core.countFlowAfter}
       readThread={fakeCore.core.readThread}
       openLink={fakeCore.core.openLink}
+      threadOpenings={threadOpenings}
     />,
   );
+  return { threadOpenings };
 }
 
 function flowLines() {
@@ -152,6 +156,19 @@ test("selecting a line opens its thread in the pane and marks the line", async (
   renderFlowLensOf([firstLine, secondLine]);
 
   await selectTheLineOf(secondLine);
+
+  const pane = await paneFor(secondLine);
+  expect(await within(pane).findByText("deploy api")).toBeDefined();
+  expect(await selectedLines()).toEqual(["second"]);
+});
+
+test("a thread opened from elsewhere opens in the pane and marks its line", async () => {
+  const lens = renderFlowLensOf([firstLine, secondLine]);
+  await flowLines();
+
+  act(() => {
+    lens.threadOpenings.open("second");
+  });
 
   const pane = await paneFor(secondLine);
   expect(await within(pane).findByText("deploy api")).toBeDefined();

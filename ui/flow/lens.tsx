@@ -3,6 +3,7 @@ import type { FlowChange, FlowWindow, Thread } from "../core/contract";
 import { dictionary } from "../dictionary";
 import { LensHeader } from "../frame/lens";
 import { OpenThread } from "../thread/open";
+import { type ThreadOpenings, useThreadOpenings } from "../thread/openings";
 import { FlowList } from "./list";
 
 export function FlowLens({
@@ -15,6 +16,7 @@ export function FlowLens({
   countFlowAfter,
   readThread,
   openLink,
+  threadOpenings,
 }: {
   change: FlowChange | undefined;
   channel: string | null;
@@ -37,8 +39,10 @@ export function FlowLens({
   ) => Promise<number>;
   readThread: (messageId: string) => Promise<Thread | null>;
   openLink: (link: string) => Promise<void>;
+  threadOpenings: ThreadOpenings;
 }) {
   const [selectedMessage, setSelectedMessage] = useState<string>();
+  useThreadOpenings(threadOpenings, setSelectedMessage);
   const closeTheThread = useCallback(() => {
     setSelectedMessage(undefined);
   }, []);

@@ -1,14 +1,17 @@
+import { useState } from "react";
 import type { Clock } from "./core/clock";
 import type {
   FlowChange,
   FlowWindow,
   OpenBoard,
   ReplicaState,
+  SearchResults,
   TaskChange,
   TaskCount,
   Thread,
 } from "./core/contract";
 import { type Store, useStore } from "./core/store";
+import { FinderBox } from "./finder/box";
 import { FlowLens } from "./flow/lens";
 import { type Lens, useChoice } from "./frame/choice";
 import { Sidebar } from "./frame/sidebar";
@@ -17,6 +20,7 @@ import { TitleBar } from "./frame/title";
 import { StartScreen } from "./start";
 import { TasksLens } from "./tasks/lens";
 import type { ReadTasks } from "./tasks/rows";
+import { createThreadOpenings, type ThreadOpenings } from "./thread/openings";
 
 type ReadFlow = (
   channel: string | null,
@@ -34,6 +38,8 @@ type ReadThread = (messageId: string) => Promise<Thread | null>;
 
 type OpenLink = (link: string) => Promise<void>;
 
+type Search = (query: string) => Promise<SearchResults>;
+
 function ChosenLens({
   lens,
   channel,
@@ -49,6 +55,7 @@ function ChosenLens({
   openLink,
   readTasks,
   readTaskCounts,
+  threadOpenings,
 }: {
   lens: Lens;
   channel: string | null;
@@ -64,6 +71,7 @@ function ChosenLens({
   openLink: OpenLink;
   readTasks: ReadTasks;
   readTaskCounts: (channel: string | null) => Promise<TaskCount[]>;
+  threadOpenings: ThreadOpenings;
 }) {
   if (lens === "tasks") {
     return (
@@ -77,6 +85,7 @@ function ChosenLens({
         readTaskCounts={readTaskCounts}
         readThread={readThread}
         openLink={openLink}
+        threadOpenings={threadOpenings}
       />
     );
   }
@@ -91,6 +100,7 @@ function ChosenLens({
       countFlowAfter={countFlowAfter}
       readThread={readThread}
       openLink={openLink}
+      threadOpenings={threadOpenings}
     />
   );
 }
@@ -109,6 +119,7 @@ export function Application({
   openLink,
   readTasks,
   readTaskCounts,
+  search,
 }: {
   openBoardStore: Store<OpenBoard>;
   replicaStore: Store<ReplicaState>;
@@ -123,16 +134,26 @@ export function Application({
   openLink: OpenLink;
   readTasks: ReadTasks;
   readTaskCounts: (channel: string | null) => Promise<TaskCount[]>;
+  search: Search;
 }) {
   const openBoard = useStore(openBoardStore);
   const replicaState = useStore(replicaStore);
   const channels = useStore(channelsStore);
   const flowChange = useStore(flowStore);
   const taskChange = useStore(tasksStore);
-  const { choice, chooseLens, chooseChannel, widen } = useChoice();
+  const { choice, chooseLens, chooseChannel, narrowTo, widen } = useChoice();
+  const [threadOpenings] = useState(createThreadOpenings);
   return (
     <div className="flex h-screen flex-col bg-paper text-ink">
-      <TitleBar />
+      <TitleBar>
+        {openBoard?.kind === "open" && (
+          <FinderBox
+            search={search}
+            onOpenThread={threadOpenings.open}
+            onNarrowTo={narrowTo}
+          />
+        )}
+      </TitleBar>
       {openBoard?.kind === "noneRunning" && (
         <main className="flex flex-1">
           <StartScreen />
@@ -164,6 +185,7 @@ export function Application({
             openLink={openLink}
             readTasks={readTasks}
             readTaskCounts={readTaskCounts}
+            threadOpenings={threadOpenings}
           />
         </div>
       )}

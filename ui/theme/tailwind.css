@@ -26,6 +26,7 @@
   --color-state-failed: var(--state-failed);
   --color-state-completed: var(--state-completed);
   --color-state-canceled: var(--state-canceled);
+  --color-scrim: var(--scrim);
   --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, monospace;
   --font-pixel: "Geist Pixel", "Geist", sans-serif;

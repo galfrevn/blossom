@@ -49,6 +49,7 @@ createRoot(rootElement).render(
       openLink={core.openLink}
       readTasks={core.readTasks}
       readTaskCounts={core.readTaskCounts}
+      search={core.search}
     />
   </StrictMode>,
 );

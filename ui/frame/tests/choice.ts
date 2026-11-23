@@ -71,3 +71,19 @@ test("widening shows the whole board in the same lens", () => {
 
   expect(result.current.choice).toEqual({ lens: "tasks", channel: null });
 });
+
+test("narrowing to a channel keeps it narrowed when it is already the one chosen", () => {
+  const { result } = renderChoice();
+
+  act(() => {
+    result.current.narrowTo("fleet/www");
+  });
+  act(() => {
+    result.current.narrowTo("fleet/www");
+  });
+
+  expect(result.current.choice).toEqual({
+    lens: "flow",
+    channel: "fleet/www",
+  });
+});

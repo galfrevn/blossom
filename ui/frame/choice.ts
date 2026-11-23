@@ -3,6 +3,7 @@ import { useCallback, useReducer } from "react";
 type Change =
   | { kind: "lens"; lens: Lens }
   | { kind: "channel"; channel: string }
+  | { kind: "narrow"; channel: string }
   | { kind: "widen" };
 
 const OPENING_CHOICE: Choice = { lens: "flow", channel: null };
@@ -10,6 +11,9 @@ const OPENING_CHOICE: Choice = { lens: "flow", channel: null };
 function choiceAfter(choice: Choice, change: Change): Choice {
   if (change.kind === "widen") {
     return { ...choice, channel: null };
+  }
+  if (change.kind === "narrow") {
+    return { ...choice, channel: change.channel };
   }
   if (change.kind === "lens") {
     if (change.lens === choice.lens) {
@@ -40,6 +44,10 @@ export function useChoice() {
     (channel: string) => change({ kind: "channel", channel }),
     [],
   );
+  const narrowTo = useCallback(
+    (channel: string) => change({ kind: "narrow", channel }),
+    [],
+  );
   const widen = useCallback(() => change({ kind: "widen" }), []);
-  return { choice, chooseLens, chooseChannel, widen };
+  return { choice, chooseLens, chooseChannel, narrowTo, widen };
 }

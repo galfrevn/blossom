@@ -4,6 +4,10 @@ const clockTime = new Intl.DateTimeFormat("en-GB", {
   minute: "2-digit",
   hourCycle: "h23",
 });
+const dayOfTheMonth = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+});
 
 function count(value: number): string {
   return countFormat.format(value);
@@ -137,6 +141,27 @@ export const english = {
     lapsed: "lapsed",
     noTasks: "No tasks on this board yet",
     noneMatch: "No task matches",
+  },
+  finder: {
+    box: "Search the board",
+    boxKey: "⌘K",
+    title: "Search the board",
+    placeholder: "Find a message, a task or a channel",
+    groups: {
+      channels: "Channels",
+      tasks: "Tasks",
+      messages: "Messages",
+      agents: "Agents",
+    },
+    channelMark: "#",
+    channel: (channel: string) => `#${channel}`,
+    handleMark: "@",
+    writtenBy: (author: string, channel: string, createdAt: string) =>
+      `${author} · #${channel} · ${dayOfTheMonth.format(new Date(createdAt))}`,
+    noMatch: "No match",
+    move: "↑↓ move",
+    open: "↵ open",
+    close: "esc close",
   },
   thread: {
     title: "Thread",

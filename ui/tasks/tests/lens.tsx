@@ -17,6 +17,7 @@ import type {
 } from "../../core/contract";
 import { createFakeCore } from "../../core/fake";
 import { dictionary } from "../../dictionary";
+import { createThreadOpenings } from "../../thread/openings";
 import { TasksLens } from "../lens";
 
 afterEach(cleanup);
@@ -65,6 +66,7 @@ function renderTasksLensOf(rows: TaskRow[]) {
   fakeCore.pushTasks(rows);
   fakeCore.pushThreads(rows.map(threadOfTask));
   const clock = createClock(ONE_SECOND);
+  const threadOpenings = createThreadOpenings();
   const lens = (channel: string | null) => (
     <TasksLens
       change={taskChange}
@@ -76,11 +78,13 @@ function renderTasksLensOf(rows: TaskRow[]) {
       readTaskCounts={fakeCore.core.readTaskCounts}
       readThread={fakeCore.core.readThread}
       openLink={fakeCore.core.openLink}
+      threadOpenings={threadOpenings}
     />
   );
   const { rerender } = render(lens(null));
   let channelNow: string | null = null;
   return {
+    threadOpenings,
     pushTasks: (newRows: TaskRow[]) => {
       fakeCore.pushTasks(newRows);
       act(() => {
@@ -237,6 +241,24 @@ test("selecting a row opens the task's thread in the pane and marks the row", as
 
   act(() => {
     row.click();
+  });
+
+  const pane = await screen.findByRole("complementary", {
+    name: dictionary.thread.inChannel("fleet/api"),
+  });
+  expect(await within(pane).findByText("task 812")).toBeDefined();
+  expect(row.getAttribute("aria-current")).toBe("true");
+});
+
+test("a thread opened from elsewhere opens in the pane and marks its row", async () => {
+  const lens = renderTasksLensOf([
+    taskRow({ id: "1" }),
+    taskRow({ id: "812", channel: "fleet/api" }),
+  ]);
+  const row = await rowOf("812");
+
+  act(() => {
+    lens.threadOpenings.open("812");
   });
 
   const pane = await screen.findByRole("complementary", {

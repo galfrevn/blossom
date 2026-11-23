@@ -10,6 +10,7 @@ import type {
 import { dictionary } from "../dictionary";
 import { LensHeader } from "../frame/lens";
 import { OpenThread } from "../thread/open";
+import { type ThreadOpenings, useThreadOpenings } from "../thread/openings";
 import { StateChips } from "./chips";
 import type { ReadTasks } from "./rows";
 import { TaskTable } from "./table";
@@ -51,6 +52,7 @@ export function TasksLens({
   readTaskCounts,
   readThread,
   openLink,
+  threadOpenings,
 }: {
   change: TaskChange | undefined;
   flowChange: FlowChange | undefined;
@@ -61,10 +63,12 @@ export function TasksLens({
   readTaskCounts: (channel: string | null) => Promise<TaskCount[]>;
   readThread: (messageId: string) => Promise<Thread | null>;
   openLink: (link: string) => Promise<void>;
+  threadOpenings: ThreadOpenings;
 }) {
   const [chosenState, setChosenState] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [selectedTask, setSelectedTask] = useState<string>();
+  useThreadOpenings(threadOpenings, setSelectedTask);
   const closeTheThread = useCallback(() => {
     setSelectedTask(undefined);
   }, []);
