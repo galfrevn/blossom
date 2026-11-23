@@ -1,3 +1,4 @@
+use blossom::contract::MentionedActor;
 use blossom::reader::ReplicaReader;
 use blossom::replica::{Batch, MessageView, Replica};
 use serde_json::json;
@@ -1058,4 +1059,49 @@ fn an_edit_that_changes_none_of_a_message_s_facts_leaves_the_order_as_it_was() {
     assert_eq!(shape_of(&window), vec!["10", "fold 1 of 1 in fleet/www"]);
     let fold = window.rows[1].fold.as_ref().unwrap();
     assert_eq!(fold.recent[0].text, "still running the tests, 3 left");
+}
+
+const CLAUDE: &str = "local:user:ada+claude";
+
+fn view_by_claude(id: &str, minute: u32, text: &str) -> Result<MessageView, serde_json::Error> {
+    let board_view = json!({
+        "id": id, "channel": "fleet/www", "thread": format!("thread-of-{id}"),
+        "createdAt": format!("2026-11-21T10:{minute:02}:00.000Z"), "version": 1, "text": text,
+        "by": { "actor": CLAUDE, "principal": "local:user:ada", "profile": "claude" },
+        "author": { "kind": "agent", "handle": "ada/claude", "name": "claude", "via": { "name": "ada", "environment": null } }
+    });
+    MessageView::parse(&board_view.to_string())
+}
+
+#[test]
+fn a_row_names_each_actor_its_text_mentions_that_the_replica_knows() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            view_by_claude("1", 0, "on it").unwrap(),
+            view_at(
+                "2",
+                1,
+                0,
+                "over to @[local:user:ada+claude], cc @[local:user:nobody] and @[local:user:ada+claude]",
+            )
+            .unwrap(),
+        ]))
+        .unwrap();
+
+    let window = ReplicaReader::open(&file)
+        .unwrap()
+        .flow_window_in(None, 0, 2)
+        .unwrap();
+
+    assert!(window.rows[0].mentions.is_empty());
+    assert_eq!(
+        window.rows[1].mentions,
+        vec![MentionedActor {
+            id: String::from(CLAUDE),
+            name: String::from("claude")
+        }]
+    );
 }

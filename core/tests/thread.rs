@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use blossom::contract::Thread;
+use blossom::contract::{MentionedActor, Thread};
 use blossom::reader::ReplicaReader;
 use blossom::replica::{Batch, MessageView, Replica};
 use rusqlite::Connection;
@@ -210,4 +210,54 @@ fn the_replica_reads_a_thread_in_order_through_an_index() {
     let plan = plan_for_reading_a_thread(&file).unwrap();
 
     assert!(reads_in_order_through_an_index(&plan), "{plan:?}");
+}
+
+const CODEX: &str = "local:user:ada+codex";
+
+fn reply_by_codex(
+    thread_root: &str,
+    id: &str,
+    minute: u32,
+) -> Result<MessageView, serde_json::Error> {
+    let board_view = json!({
+        "id": id, "channel": "fleet/www", "thread": format!("thread-{thread_root}"), "re": thread_root,
+        "createdAt": format!("2026-11-21T10:{minute:02}:00.000Z"), "version": 1, "text": "looking",
+        "by": { "actor": CODEX, "principal": "local:user:ada", "profile": "codex" },
+        "author": { "kind": "agent", "handle": "ada/codex", "name": "codex", "via": { "name": "ada", "environment": null } }
+    });
+    MessageView::parse(&board_view.to_string())
+}
+
+#[test]
+fn a_message_of_a_thread_names_each_actor_it_mentions_that_the_replica_knows() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            message_in(
+                "root",
+                "root",
+                0,
+                "@[local:user:ada+codex] and @[local:user:nobody], have a look",
+            )
+            .unwrap(),
+            reply_by_codex("root", "reply", 1).unwrap(),
+        ]))
+        .unwrap();
+
+    let thread = ReplicaReader::open(&file)
+        .unwrap()
+        .thread_of("root")
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        thread.messages[0].mentions,
+        vec![MentionedActor {
+            id: String::from(CODEX),
+            name: String::from("codex")
+        }]
+    );
+    assert!(thread.messages[1].mentions.is_empty());
 }

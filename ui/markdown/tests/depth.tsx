@@ -11,7 +11,9 @@ const EMPHASIS_LEVELS_TRIED = DEEPEST_NESTING * 2;
 const STARS_PER_EMPHASIS_LEVEL = 2;
 
 function renderMarkdown(markdown: string): HTMLElement {
-  const { container } = render(<div>{elementsOfMarkdown(markdown)}</div>);
+  const { container } = render(
+    <div>{elementsOfMarkdown(markdown, new Map())}</div>,
+  );
   const text = container.firstElementChild;
   if (!(text instanceof HTMLElement)) {
     throw new Error("the markdown was not rendered into its container");

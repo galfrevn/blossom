@@ -15,6 +15,7 @@ import type {
   ReplicaState,
   SearchResults,
   Thread,
+  ThreadMessage,
 } from "../core/contract";
 import { createFakeCore, type FakeCore } from "../core/fake";
 import { createStore } from "../core/store";
@@ -79,12 +80,24 @@ function renderApplicationWhileTheCoreSays(said: {
   return fakeCore;
 }
 
-const rootOfTheDeploy = {
+const rootOfTheDeploy: ThreadMessage = {
   id: "root",
   author: "Ada Lovelace",
   onBehalfOf: null,
   createdAt: "2026-11-21T10:00:00.000Z",
   text: "deploy www",
+  mentions: [],
+  edited: false,
+  deleted: false,
+};
+
+const replyOfClaude: ThreadMessage = {
+  id: "reply",
+  author: "claude",
+  onBehalfOf: "ada",
+  createdAt: "2026-11-21T10:01:00.000Z",
+  text: "deploy failed",
+  mentions: [],
   edited: false,
   deleted: false,
 };
@@ -92,18 +105,7 @@ const rootOfTheDeploy = {
 const threadOfTheDeploy: Thread = {
   id: "thread-root",
   channel: "fleet/www",
-  messages: [
-    rootOfTheDeploy,
-    {
-      id: "reply",
-      author: "claude",
-      onBehalfOf: "ada",
-      createdAt: "2026-11-21T10:01:00.000Z",
-      text: "deploy failed",
-      edited: false,
-      deleted: false,
-    },
-  ],
+  messages: [rootOfTheDeploy, replyOfClaude],
 };
 
 function statusBar() {
@@ -196,14 +198,8 @@ test("selecting a line in Flow opens its thread in the pane, beside the lens", a
     channels: ["fleet/www"],
     flow: [
       {
-        id: "reply",
+        ...replyOfClaude,
         channel: "fleet/www",
-        author: "claude",
-        onBehalfOf: "ada",
-        createdAt: "2026-11-21T10:01:00.000Z",
-        text: "deploy failed",
-        edited: false,
-        deleted: false,
         firstOfItsMinute: true,
         fold: null,
       },

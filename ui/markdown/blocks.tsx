@@ -1,7 +1,9 @@
-import { Lexer, type MarkedToken, type Token, type Tokens } from "marked";
+import type { MarkedToken, Token, Tokens } from "marked";
 import type { ReactNode } from "react";
 import { isPastTheDeepestNesting } from "./depth";
 import { elementsOfInline } from "./inline";
+import { tokensOf } from "./lexer";
+import type { Names } from "./mention";
 import {
   drawnInOrder,
   markedTokensOf,
@@ -200,17 +202,8 @@ function elementsOfBlocks(tokens: Token[], depth: number): ReactNode[] {
   );
 }
 
-function tokensOf(markdown: string): Token[] | undefined {
-  try {
-    return Lexer.lex(markdown, { gfm: true, breaks: true });
-  } catch (error: unknown) {
-    console.error("blossom: a message could not be read as markdown", error);
-    return undefined;
-  }
-}
-
-export function elementsOfMarkdown(markdown: string): ReactNode {
-  const tokens = tokensOf(markdown);
+export function elementsOfMarkdown(markdown: string, names: Names): ReactNode {
+  const tokens = tokensOf(markdown, names);
   if (tokens === undefined) {
     return writtenAsIs(markdown);
   }

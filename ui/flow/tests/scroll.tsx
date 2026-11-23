@@ -54,6 +54,7 @@ function messageInFlow(overrides: Partial<FlowRow> & { id: string }): FlowRow {
     onBehalfOf: "ada",
     createdAt: "2026-11-21T10:00:00.000Z",
     text: "deploy failed",
+    mentions: [],
     edited: false,
     deleted: false,
     firstOfItsMinute: false,

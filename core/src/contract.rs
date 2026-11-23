@@ -12,6 +12,7 @@ pub fn typescript() -> String {
         OpenBoard::decl(&configuration),
         StopReason::decl(&configuration),
         ReplicaState::decl(&configuration),
+        MentionedActor::decl(&configuration),
         FlowRow::decl(&configuration),
         FlowFold::decl(&configuration),
         FlowWindow::decl(&configuration),
@@ -81,6 +82,12 @@ pub enum StopReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+pub struct MentionedActor {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct FlowRow {
     pub id: String,
@@ -89,6 +96,7 @@ pub struct FlowRow {
     pub on_behalf_of: Option<String>,
     pub created_at: String,
     pub text: String,
+    pub mentions: Vec<MentionedActor>,
     pub edited: bool,
     pub deleted: bool,
     pub first_of_its_minute: bool,
@@ -122,6 +130,7 @@ pub struct ThreadMessage {
     pub on_behalf_of: Option<String>,
     pub created_at: String,
     pub text: String,
+    pub mentions: Vec<MentionedActor>,
     pub edited: bool,
     pub deleted: bool,
 }

@@ -7,6 +7,10 @@ export function markedTokensOf(tokens: Token[]): MarkedToken[] {
   return tokens as MarkedToken[];
 }
 
+export function markedTokenOf(token: Token): MarkedToken {
+  return token as MarkedToken;
+}
+
 export function drawnInOrder<Item>(
   items: Item[],
   draw: (item: Item) => ReactNode,

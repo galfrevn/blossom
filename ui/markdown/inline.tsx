@@ -2,7 +2,8 @@ import type { MarkedToken, Token, Tokens } from "marked";
 import type { ReactNode } from "react";
 import { isPastTheDeepestNesting } from "./depth";
 import { linkToOpen } from "./link";
-import { drawnInOrder, markedTokensOf } from "./tokens";
+import { isMention } from "./mention";
+import { drawnInOrder, markedTokenOf } from "./tokens";
 
 const LINK_LOOK =
   "text-ink underline decoration-line-strong underline-offset-2 hover:decoration-ink";
@@ -110,8 +111,15 @@ function drawInline(token: MarkedToken, depth: number): ReactNode {
   }
 }
 
+function drawMention(name: string): ReactNode {
+  return <span className="font-medium text-accent-ink">{name}</span>;
+}
+
 export function elementsOfInline(tokens: Token[], depth: number): ReactNode[] {
-  return drawnInOrder(markedTokensOf(tokens), (token) =>
-    drawInline(token, depth),
-  );
+  return drawnInOrder(tokens, (token) => {
+    if (isMention(token)) {
+      return drawMention(token.text);
+    }
+    return drawInline(markedTokenOf(token), depth);
+  });
 }

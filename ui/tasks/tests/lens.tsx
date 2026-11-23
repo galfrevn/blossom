@@ -45,6 +45,7 @@ function threadOfTask(row: TaskRow): Thread {
     onBehalfOf: null,
     createdAt: row.changedAt,
     text: row.title,
+    mentions: [],
     edited: false,
     deleted: false,
   };

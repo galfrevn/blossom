@@ -34,6 +34,7 @@ function messageInFlow(id: string, text: string): FlowRow {
     onBehalfOf: "ada",
     createdAt: "2026-11-21T10:00:00.000Z",
     text,
+    mentions: [],
     edited: false,
     deleted: false,
     firstOfItsMinute: false,
@@ -48,6 +49,7 @@ function threadOfItsOwn(row: FlowRow): Thread {
     onBehalfOf: row.onBehalfOf,
     createdAt: row.createdAt,
     text: row.text,
+    mentions: row.mentions,
     edited: row.edited,
     deleted: row.deleted,
   };

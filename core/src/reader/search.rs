@@ -1,6 +1,9 @@
+use std::ops::Range;
+
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::contract::{FoundAgent, FoundChannel, FoundMessage, FoundTask, SearchResults, TextPart};
+use crate::reader::mentions::{Mention, mentions_in, reading_of};
 
 const MOST_RESULTS_IN_A_GROUP: i64 = 50;
 const NEWEST_MATCHES_RANKED: i64 = 10_000;
@@ -97,7 +100,8 @@ fn found_messages(
                     ''
                 ),
                 messages.created_at,
-                coalesce(snippet(message_words, 0, ?3, ?4, ?5, ?6), '')
+                coalesce(snippet(message_words, 0, ?3, ?4, ?5, ?6), ''),
+                coalesce(json_extract(messages.view, '$.text'), '')
          FROM message_words
          JOIN arrivals ON arrivals.sequence = message_words.rowid
          JOIN messages ON messages.id = arrivals.id
@@ -121,7 +125,11 @@ fn found_messages(
                 channel: row.get(1)?,
                 author: row.get(2)?,
                 created_at: row.get(3)?,
-                snippet: marked_parts(&row.get::<_, String>(4)?),
+                snippet: snippet_reading_mentions(
+                    connection,
+                    &row.get::<_, String>(4)?,
+                    &row.get::<_, String>(5)?,
+                )?,
             })
         },
     )?;
@@ -142,10 +150,12 @@ fn found_tasks(
         "SELECT tasks.id,
                 tasks.channel,
                 tasks.state,
-                coalesce(snippet(task_words, 0, ?3, ?4, ?5, ?6), '')
+                coalesce(snippet(task_words, 0, ?3, ?4, ?5, ?6), ''),
+                coalesce(json_extract(messages.view, '$.text'), '')
          FROM task_words
          JOIN arrivals ON arrivals.sequence = task_words.rowid
          JOIN tasks ON tasks.id = arrivals.id
+         JOIN messages ON messages.id = tasks.id
          WHERE task_words MATCH ?1 AND task_words.rowid >= ?2
          ORDER BY task_words.rank
          LIMIT ?7",
@@ -165,7 +175,11 @@ fn found_tasks(
                 id: row.get(0)?,
                 channel: row.get(1)?,
                 state: row.get(2)?,
-                snippet: marked_parts(&row.get::<_, String>(3)?),
+                snippet: snippet_reading_mentions(
+                    connection,
+                    &row.get::<_, String>(3)?,
+                    &row.get::<_, String>(4)?,
+                )?,
             })
         },
     )?;
@@ -252,4 +266,150 @@ fn push_part(parts: &mut Vec<TextPart>, text: &str, marked: bool) {
         text: text.to_owned(),
         marked,
     });
+}
+
+struct SnippetText {
+    plain: String,
+    marked_bytes: Vec<bool>,
+}
+
+impl SnippetText {
+    fn of(parts: &[TextPart]) -> SnippetText {
+        let mut plain = String::new();
+        let mut marked_bytes = Vec::new();
+        for part in parts {
+            plain.push_str(&part.text);
+            marked_bytes.resize(plain.len(), part.marked);
+        }
+        SnippetText {
+            plain,
+            marked_bytes,
+        }
+    }
+}
+
+struct ShownPart {
+    in_snippet: Range<usize>,
+    in_text: Range<usize>,
+    cut_before: bool,
+    cut_after: bool,
+}
+
+impl ShownPart {
+    fn starting_at_in(
+        snippet: &str,
+        text: &str,
+        cut_before: bool,
+        cut_after: bool,
+    ) -> Option<ShownPart> {
+        let start = if cut_before { ELLIPSIS.len() } else { 0 };
+        let end = snippet
+            .len()
+            .checked_sub(if cut_after { ELLIPSIS.len() } else { 0 })?;
+        let shown = snippet.get(start..end)?;
+        let found_at = if !cut_before {
+            text.starts_with(shown).then_some(0)
+        } else if !cut_after {
+            text.ends_with(shown).then(|| text.len() - shown.len())
+        } else {
+            text.find(shown)
+        };
+        let at = found_at.filter(|at| cut_after || at + shown.len() == text.len())?;
+        Some(ShownPart {
+            in_snippet: start..end,
+            in_text: at..at + shown.len(),
+            cut_before,
+            cut_after,
+        })
+    }
+
+    fn of(snippet: &str, text: &str) -> Option<ShownPart> {
+        let starts_cut = snippet.starts_with(ELLIPSIS);
+        let ends_cut = snippet.len() > ELLIPSIS.len() && snippet.ends_with(ELLIPSIS);
+        [
+            (starts_cut, ends_cut),
+            (false, ends_cut),
+            (starts_cut, false),
+            (false, false),
+        ]
+        .into_iter()
+        .find_map(|(cut_before, cut_after)| {
+            ShownPart::starting_at_in(snippet, text, cut_before, cut_after)
+        })
+    }
+
+    fn overlaps(&self, mention: &Mention<'_>) -> bool {
+        mention.span.start < self.in_text.end && self.in_text.start < mention.span.end
+    }
+}
+
+fn snippet_reading_mentions(
+    connection: &Connection,
+    marked_snippet: &str,
+    text: &str,
+) -> rusqlite::Result<Vec<TextPart>> {
+    let as_marked = marked_parts(marked_snippet);
+    let snippet = SnippetText::of(&as_marked);
+    let Some(shown) = ShownPart::of(&snippet.plain, text) else {
+        return Ok(as_marked);
+    };
+    let mentions: Vec<Mention<'_>> = mentions_in(text)
+        .into_iter()
+        .filter(|mention| shown.overlaps(mention))
+        .collect();
+    if mentions.is_empty() {
+        return Ok(as_marked);
+    }
+    let is_marked = |position_in_text: usize| {
+        let position_in_snippet = position_in_text - shown.in_text.start + shown.in_snippet.start;
+        snippet
+            .marked_bytes
+            .get(position_in_snippet)
+            .copied()
+            .unwrap_or(false)
+    };
+    let mut parts = Vec::new();
+    if shown.cut_before {
+        push_joined(&mut parts, ELLIPSIS, false);
+    }
+    let mut position = shown.in_text.start;
+    for mention in &mentions {
+        let visible =
+            mention.span.start.max(shown.in_text.start)..mention.span.end.min(shown.in_text.end);
+        push_marked_text(&mut parts, text, position..visible.start, &is_marked);
+        let marked = visible.clone().any(&is_marked);
+        push_joined(&mut parts, &reading_of(connection, mention)?, marked);
+        position = visible.end;
+    }
+    push_marked_text(&mut parts, text, position..shown.in_text.end, &is_marked);
+    if shown.cut_after {
+        push_joined(&mut parts, ELLIPSIS, false);
+    }
+    Ok(parts)
+}
+
+fn push_marked_text(
+    parts: &mut Vec<TextPart>,
+    text: &str,
+    range: Range<usize>,
+    is_marked: &impl Fn(usize) -> bool,
+) {
+    let Some(slice) = text.get(range.clone()) else {
+        return;
+    };
+    let mut character_bytes = [0; 4];
+    for (offset, character) in slice.char_indices() {
+        let marked = is_marked(range.start + offset);
+        push_joined(parts, character.encode_utf8(&mut character_bytes), marked);
+    }
+}
+
+fn push_joined(parts: &mut Vec<TextPart>, text: &str, marked: bool) {
+    if let Some(last) = parts.last_mut()
+        && last.marked == marked
+    {
+        last.text.push_str(text);
+        return;
+    }
+    push_part(parts, text, marked);
 }

@@ -17,6 +17,7 @@ function progressRow(id: string, text: string): FlowRow {
     onBehalfOf: "ada",
     createdAt: "2026-11-21T11:00:00.000Z",
     text,
+    mentions: [],
     edited: false,
     deleted: false,
     firstOfItsMinute: false,

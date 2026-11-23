@@ -1,13 +1,14 @@
 import { memo, type ReactNode } from "react";
-import type { ThreadMessage } from "../core/contract";
+import type { MentionedActor, ThreadMessage } from "../core/contract";
 import { dictionary } from "../dictionary";
 import { elementsOfMarkdown } from "../markdown/blocks";
+import { namesOf } from "../markdown/mention";
 
 function bodyOf(message: ThreadMessage): ReactNode {
   if (message.deleted) {
     return dictionary.thread.deleted;
   }
-  return elementsOfMarkdown(message.text);
+  return elementsOfMarkdown(message.text, namesOf(message.mentions));
 }
 
 function OnBehalfOf({ person }: { person: string | null }) {
@@ -52,6 +53,19 @@ function MessageOfTheThread({ message }: { message: ThreadMessage }) {
   );
 }
 
+function mentionTheSame(
+  before: MentionedActor[],
+  after: MentionedActor[],
+): boolean {
+  return (
+    before.length === after.length &&
+    before.every(
+      (actor, index) =>
+        actor.id === after[index]?.id && actor.name === after[index]?.name,
+    )
+  );
+}
+
 function readsTheSame(
   previous: { message: ThreadMessage },
   next: { message: ThreadMessage },
@@ -64,6 +78,7 @@ function readsTheSame(
     before.onBehalfOf === after.onBehalfOf &&
     before.createdAt === after.createdAt &&
     before.text === after.text &&
+    mentionTheSame(before.mentions, after.mentions) &&
     before.edited === after.edited &&
     before.deleted === after.deleted
   );

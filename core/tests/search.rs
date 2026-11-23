@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use blossom::contract::{SearchResults, TextPart};
 use blossom::reader::ReplicaReader;
 use blossom::replica::{Batch, MessageView, Replica};
@@ -648,4 +650,115 @@ fn the_search_syntax_in_a_query_is_read_as_plain_words() {
     ] {
         assert!(reader.search(query).is_ok(), "{query:?}");
     }
+}
+
+fn replica_where_claude_wrote(
+    folder: &TempDir,
+    views: &[Value],
+) -> Result<ReplicaReader, Box<dyn Error>> {
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file)?;
+    let mut written = vec![written_by(
+        message("by-claude", 1, "on it"),
+        CLAUDE,
+        "agent",
+        "ada/claude",
+        "claude",
+    )];
+    written.extend_from_slice(views);
+    replica.apply(&batch_of(&written)?)?;
+    Ok(ReplicaReader::open(&file)?)
+}
+
+#[test]
+fn a_snippet_reads_a_mention_as_the_name_of_whom_it_mentions_or_as_an_id_it_does_not_know() {
+    let folder = TempDir::new().unwrap();
+    let reader = replica_where_claude_wrote(
+        &folder,
+        &[message(
+            "1",
+            1,
+            "deploy failed, ask @[local:user:ada+claude] or @[local:user:nobody]",
+        )],
+    )
+    .unwrap();
+
+    let snippet = reader.search("deploy").unwrap().messages.remove(0).snippet;
+
+    assert_eq!(
+        whole_text(&snippet),
+        "deploy failed, ask @claude or @local:user:nobody"
+    );
+    assert_eq!(marked_words(&snippet), vec!["deploy"]);
+}
+
+#[test]
+fn a_mention_whose_words_matched_is_marked_whole() {
+    let folder = TempDir::new().unwrap();
+    let reader = replica_where_claude_wrote(
+        &folder,
+        &[message("1", 1, "over to @[local:user:ada+claude] now")],
+    )
+    .unwrap();
+
+    let snippet = reader.search("claude").unwrap().messages.remove(0).snippet;
+
+    assert_eq!(whole_text(&snippet), "over to @claude now");
+    assert_eq!(marked_words(&snippet), vec!["@claude"]);
+}
+
+#[test]
+fn a_snippet_cut_inside_a_mention_reads_the_whole_mention() {
+    let folder = TempDir::new().unwrap();
+    let ends_inside = "one two three four five six seven eight nine ten eleven twelve thirteen \
+                       fourteen fifteen sixteen seventeen eighteen nineteen deploy failed, ask \
+                       @[local:user:ada+claude] about it twenty twentyone twentytwo twentythree";
+    let starts_inside =
+        "a b c d e f g h i j @[local:user:ada+claude] x y deploy z1 z2 z3 z4 z5 z6 z7 z8 z9";
+    let reader = replica_where_claude_wrote(
+        &folder,
+        &[
+            message("ends-inside", 1, ends_inside),
+            message("starts-inside", 1, starts_inside),
+        ],
+    )
+    .unwrap();
+
+    let results = reader.search("deploy").unwrap();
+    let snippet_of = |id: &str| {
+        let found = results
+            .messages
+            .iter()
+            .find(|found| found.id == id)
+            .unwrap();
+        whole_text(&found.snippet)
+    };
+
+    assert_eq!(
+        snippet_of("ends-inside"),
+        "…fifteen sixteen seventeen eighteen nineteen deploy failed, ask @claude…"
+    );
+    assert_eq!(
+        snippet_of("starts-inside"),
+        "…@claude x y deploy z1 z2 z3 z4 z5 z6…"
+    );
+}
+
+#[test]
+fn a_task_s_snippet_reads_mentions_the_same_way() {
+    let folder = TempDir::new().unwrap();
+    let reader = replica_where_claude_wrote(
+        &folder,
+        &[task_root(
+            "10",
+            1,
+            "ready",
+            "fix the flaky test, @[local:user:ada+claude]",
+        )],
+    )
+    .unwrap();
+
+    let snippet = reader.search("flaky").unwrap().tasks.remove(0).snippet;
+
+    assert_eq!(whole_text(&snippet), "fix the flaky test, @claude");
 }

@@ -2,6 +2,7 @@ use rusqlite::params;
 
 use crate::contract::{Thread, ThreadMessage};
 use crate::reader::ReplicaReader;
+use crate::reader::mentions::actors_mentioned_in;
 use crate::replica::ReplicaError;
 
 impl ReplicaReader {
@@ -29,6 +30,7 @@ impl ReplicaReader {
                 author: row.get(4)?,
                 on_behalf_of: row.get(5)?,
                 text: row.get(6)?,
+                mentions: Vec::new(),
                 edited: row.get(7)?,
                 deleted: row.get(8)?,
             };
@@ -37,8 +39,11 @@ impl ReplicaReader {
         let mut thread_and_channel = None;
         let mut messages = Vec::new();
         for row in rows {
-            let (thread_id, channel, message) = row?;
+            let (thread_id, channel, mut message) = row?;
             thread_and_channel.get_or_insert((thread_id, channel));
+            if !message.deleted {
+                message.mentions = actors_mentioned_in(&self.connection, &message.text)?;
+            }
             messages.push(message);
         }
         let Some((id, channel)) = thread_and_channel else {

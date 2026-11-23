@@ -15,7 +15,9 @@ const SUMMARY = "logs";
 const DETAILS = `<details><summary>${SUMMARY}</summary>`;
 
 function renderMarkdown(markdown: string) {
-  const { container } = render(<div>{elementsOfMarkdown(markdown)}</div>);
+  const { container } = render(
+    <div>{elementsOfMarkdown(markdown, new Map())}</div>,
+  );
   const text = container.firstElementChild;
   if (!(text instanceof HTMLElement)) {
     throw new Error("the markdown was not rendered into its container");

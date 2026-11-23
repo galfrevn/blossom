@@ -1,5 +1,6 @@
 mod fleet;
 mod lines;
+mod mentions;
 mod numbers;
 mod search;
 mod tasks;
@@ -338,7 +339,12 @@ impl ReplicaReader {
                 break;
             };
             let first_of_its_minute = previous_minute != Some(latest.minute());
-            let mut row = read_row(&mut statement, latest, first_of_its_minute)?;
+            let mut row = read_row(
+                &self.connection,
+                &mut statement,
+                latest,
+                first_of_its_minute,
+            )?;
             if let Line::Fold { members, .. } = line {
                 row.fold = Some(self.fold_of(&mut statement, members)?);
             }
@@ -369,7 +375,7 @@ impl ReplicaReader {
         let mut recent = Vec::new();
         for position in members.get(shown_from..).unwrap_or_default() {
             if let Some(member) = self.flow.get(*position) {
-                recent.push(read_row(statement, member, false)?);
+                recent.push(read_row(&self.connection, statement, member, false)?);
             }
         }
         Ok(FlowFold {
@@ -381,11 +387,12 @@ impl ReplicaReader {
 }
 
 fn read_row(
+    connection: &Connection,
     statement: &mut CachedStatement<'_>,
     ordered: &OrderedMessage,
     first_of_its_minute: bool,
 ) -> Result<FlowRow, ReplicaError> {
-    let row = statement.query_row(params![&*ordered.id], |row| {
+    let mut row = statement.query_row(params![&*ordered.id], |row| {
         Ok(FlowRow {
             id: ordered.id.to_string(),
             channel: row.get(0)?,
@@ -393,11 +400,15 @@ fn read_row(
             on_behalf_of: row.get(2)?,
             created_at: ordered.created_at.to_string(),
             text: row.get(3)?,
+            mentions: Vec::new(),
             edited: row.get(4)?,
             deleted: row.get(5)?,
             first_of_its_minute,
             fold: None,
         })
     })?;
+    if !row.deleted {
+        row.mentions = mentions::actors_mentioned_in(connection, &row.text)?;
+    }
     Ok(row)
 }

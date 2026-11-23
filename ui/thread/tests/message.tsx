@@ -17,6 +17,7 @@ function renderMessage(overrides: Partial<ThreadMessage>) {
     onBehalfOf: "ada",
     createdAt: "2026-11-21T10:00:00.000Z",
     text: "deploy www",
+    mentions: [],
     edited: false,
     deleted: false,
     ...overrides,
@@ -79,4 +80,14 @@ test("an edited message says so", () => {
   const message = renderMessage({ edited: true, text: "fixed" });
 
   expect(within(message).getByText(dictionary.thread.edited)).toBeDefined();
+});
+
+test("a mention reads as the name of whom it mentions", () => {
+  const message = renderMessage({
+    text: "@[local:user:ada+codex] can you look?",
+    mentions: [{ id: "local:user:ada+codex", name: "codex" }],
+  });
+
+  expect(message.textContent).toContain("@codex can you look?");
+  expect(within(message).queryByRole("link")).toBeNull();
 });

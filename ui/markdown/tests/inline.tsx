@@ -6,9 +6,14 @@ afterEach(cleanup);
 
 const ALERT = "alert(1)";
 const IMAGE_THAT_ALERTS = `<img src="x" onerror="${ALERT}">`;
+const CLAUDE = "local:user:ada+claude";
+const NOBODY = new Map<string, string>();
+const NAMES = new Map([[CLAUDE, "claude"]]);
 
-function renderMarkdown(markdown: string) {
-  const { container } = render(<div>{elementsOfMarkdown(markdown)}</div>);
+function renderMarkdown(markdown: string, names = NOBODY) {
+  const { container } = render(
+    <div>{elementsOfMarkdown(markdown, names)}</div>,
+  );
   const text = container.firstElementChild;
   if (!(text instanceof HTMLElement)) {
     throw new Error("the markdown was not rendered into its container");
@@ -139,13 +144,6 @@ test("escaped characters read as themselves", () => {
   expect(text.textContent).toBe("*not emphasis*");
 });
 
-test("a mention reads as it was written", () => {
-  const { text } = renderMarkdown("over to @[local:user:ada]");
-
-  expect(text.textContent).toBe("over to @[local:user:ada]");
-  expect(text.querySelector("a")).toBeNull();
-});
-
 test("emphasis that never closes is text", () => {
   const { text } = renderMarkdown("**unfinished and `unclosed");
 
@@ -164,4 +162,30 @@ test("a link names where it goes when nothing else names it", () => {
   expect(view.getByRole("link").getAttribute("title")).toBe(
     "https://vercel.com/deploys/1",
   );
+});
+
+test("a mention reads as the name of whom it mentions, and one nobody knows as its ID", () => {
+  const { text } = renderMarkdown(
+    `over to @[${CLAUDE}], cc *@[local:user:nobody]*`,
+    NAMES,
+  );
+
+  expect(text.textContent).toBe("over to @claude, cc @local:user:nobody");
+  expect(textOfEach(text, "em")).toEqual(["@local:user:nobody"]);
+});
+
+test("a mention is never a link, even where markdown would make it one", () => {
+  const { text } = renderMarkdown(
+    `ask @[${CLAUDE}](#elsewhere) or @[ada@vercel.com]\n\n[${CLAUDE}]: https://vercel.com`,
+    NAMES,
+  );
+
+  expect(text.querySelector("a")).toBeNull();
+  expect(text.textContent).toBe("ask @claude(#elsewhere) or @ada@vercel.com");
+});
+
+test("a mention in code reads as written", () => {
+  const { text } = renderMarkdown(`type \`@[${CLAUDE}]\``, NAMES);
+
+  expect(textOfEach(text, "code")).toEqual([`@[${CLAUDE}]`]);
 });

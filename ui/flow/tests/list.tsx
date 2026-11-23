@@ -55,6 +55,7 @@ function messageInFlow(overrides: Partial<FlowRow> & { id: string }): FlowRow {
     onBehalfOf: "ada",
     createdAt: "2026-11-21T10:00:00.000Z",
     text: "deploy failed",
+    mentions: [],
     edited: false,
     deleted: false,
     firstOfItsMinute: false,
@@ -189,4 +190,21 @@ test("a board nobody has written on shows how to point an agent at it", async ()
   expect(
     await screen.findByRole("heading", { name: dictionary.emptyBoard.title }),
   ).toBeDefined();
+});
+
+test("a line shows its message as plain text, with no link in it", async () => {
+  renderFlowOf([
+    messageInFlow({
+      id: "1",
+      text: "**failed** on `www`, see [the run](https://vercel.com/runs/1), @[local:user:ada+codex]",
+      mentions: [{ id: "local:user:ada+codex", name: "codex" }],
+    }),
+  ]);
+
+  const line = await flowList().findByRole("article");
+
+  expect(
+    within(line).getByText("failed on www, see the run, @codex"),
+  ).toBeDefined();
+  expect(within(line).queryByRole("link")).toBeNull();
 });
