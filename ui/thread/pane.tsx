@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { FlowChange, Thread } from "../core/contract";
 import { dictionary } from "../dictionary";
 import { isAtTheBottom } from "../flow/state";
+import { useOpeningLinksInTheBrowser } from "./links";
 import { Message } from "./message";
 
 type ThreadPaneProps = {
@@ -18,7 +19,6 @@ type ThreadRead = {
 };
 
 type PaneBody = React.RefObject<HTMLDivElement | null>;
-type PaneElement = React.RefObject<HTMLElement | null>;
 
 function isAtTheEnd(body: HTMLElement | null): boolean {
   if (body === null) {
@@ -90,40 +90,6 @@ function useClosingOnEscape(onClose: () => void) {
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [onClose]);
-}
-
-function linkClicked(event: MouseEvent): string | undefined {
-  if (!(event.target instanceof Element)) {
-    return undefined;
-  }
-  const anchor = event.target.closest("a[href]");
-  return anchor?.getAttribute("href") ?? undefined;
-}
-
-function useOpeningLinksInTheBrowser(
-  pane: PaneElement,
-  openLink: (link: string) => Promise<void>,
-) {
-  useEffect(() => {
-    const element = pane.current;
-    if (element === null) {
-      return;
-    }
-    const openTheClickedLink = (event: MouseEvent) => {
-      const link = linkClicked(event);
-      if (link === undefined) {
-        return;
-      }
-      event.preventDefault();
-      openLink(link).catch((error: unknown) => {
-        console.error("blossom: a link could not be opened", error);
-      });
-    };
-    element.addEventListener("click", openTheClickedLink);
-    return () => {
-      element.removeEventListener("click", openTheClickedLink);
-    };
-  }, [pane, openLink]);
 }
 
 function headingOf(read: ThreadRead | undefined): string {
