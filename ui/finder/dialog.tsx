@@ -1,26 +1,13 @@
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef } from "react";
+import type { Command } from "../commands";
 import { arrowStepOf } from "../core/arrows";
-import type { FoundAgent, SearchResults } from "../core/contract";
+import type { SearchResults } from "../core/contract";
 import { dictionary } from "../dictionary";
-import { type FinderOption, optionsOf } from "./options";
+import { useFinding } from "./finding";
+import type { FinderOption } from "./options";
 import { FinderResults } from "./results";
-import { createSearches, type Searches } from "./searches";
 
 type Search = (query: string) => Promise<SearchResults>;
-
-type Shown = {
-  query: string;
-  options: FinderOption[];
-  agents: FoundAgent[];
-  selectedIndex: number;
-};
 
 type BoxElement = React.RefObject<HTMLInputElement | null>;
 type ScrimElement = React.RefObject<HTMLDivElement | null>;
@@ -32,55 +19,11 @@ type KeyActions = {
   onClose: () => void;
 };
 
-const NOTHING_SHOWN: Shown = {
-  query: "",
-  options: [],
-  agents: [],
-  selectedIndex: 0,
+type Selection = {
+  listShown: boolean;
+  options: FinderOption[];
+  selectedIndex: number;
 };
-
-function selectionMovedBy(shown: Shown, step: number): Shown {
-  const count = shown.options.length;
-  if (count === 0) {
-    return shown;
-  }
-  const selectedIndex = (shown.selectedIndex + step + count) % count;
-  return { ...shown, selectedIndex };
-}
-
-function useAnswersAsTheQueryChanges(search: Search) {
-  const [query, setQuery] = useState("");
-  const [shown, setShown] = useState(NOTHING_SHOWN);
-  const searches = useRef<Searches | null>(null);
-  useEffect(() => {
-    const created = createSearches(search, (answer) => {
-      setShown({
-        query: answer.query,
-        options: optionsOf(answer.results),
-        agents: answer.results.agents,
-        selectedIndex: 0,
-      });
-    });
-    searches.current = created;
-    return () => {
-      created.stop();
-    };
-  }, [search]);
-  const typeIntoTheBox = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const typed = event.target.value;
-      setQuery(typed);
-      if (searches.current !== null) {
-        searches.current.ask(typed);
-      }
-    },
-    [],
-  );
-  const moveSelection = useCallback((step: number) => {
-    setShown((current) => selectionMovedBy(current, step));
-  }, []);
-  return { query, shown, typeIntoTheBox, moveSelection };
-}
 
 function useKeyboardInTheBox(box: BoxElement) {
   useLayoutEffect(() => {
@@ -119,7 +62,9 @@ function useOpeningOf(
 ) {
   return useCallback(
     (option: FinderOption) => {
-      if (option.kind === "channel") {
+      if (option.kind === "command") {
+        option.command.run();
+      } else if (option.kind === "channel") {
         onNarrowTo(option.found.path);
       } else {
         onOpenThread(option.found.id);
@@ -160,11 +105,14 @@ function useKeysOfTheBox(actions: KeyActions) {
   );
 }
 
-function selectedOptionId(listId: string, shown: Shown): string | undefined {
-  if (shown.options[shown.selectedIndex] === undefined) {
+function selectedOptionId(
+  listId: string,
+  selection: Selection,
+): string | undefined {
+  if (selection.options[selection.selectedIndex] === undefined) {
     return undefined;
   }
-  return `${listId}-${shown.selectedIndex}`;
+  return `${listId}-${selection.selectedIndex}`;
 }
 
 function Foot() {
@@ -172,7 +120,7 @@ function Foot() {
   return (
     <div className="flex gap-3.5 border-line border-t px-3 py-[7px] font-mono text-[10.5px] text-ink-3">
       <span>{text.move}</span>
-      <span>{text.open}</span>
+      <span>{text.run}</span>
       <span>{text.close}</span>
     </div>
   );
@@ -182,14 +130,14 @@ function QueryBox({
   box,
   listId,
   query,
-  shown,
+  selection,
   onType,
   onKey,
 }: {
   box: BoxElement;
   listId: string;
   query: string;
-  shown: Shown;
+  selection: Selection;
   onType: (event: React.ChangeEvent<HTMLInputElement>) => void;
   onKey: (event: KeyInTheBox) => void;
 }) {
@@ -198,10 +146,10 @@ function QueryBox({
       ref={box}
       role="combobox"
       aria-label={dictionary.finder.title}
-      aria-expanded={shown.query.trim() !== ""}
+      aria-expanded={selection.listShown}
       aria-controls={listId}
       aria-autocomplete="list"
-      aria-activedescendant={selectedOptionId(listId, shown)}
+      aria-activedescendant={selectedOptionId(listId, selection)}
       value={query}
       onChange={onType}
       onKeyDown={onKey}
@@ -213,24 +161,55 @@ function QueryBox({
   );
 }
 
+function ListWhenShown({
+  listId,
+  finding,
+  onOpen,
+}: {
+  listId: string;
+  finding: ReturnType<typeof useFinding>;
+  onOpen: (option: FinderOption) => void;
+}) {
+  if (!finding.listShown) {
+    return null;
+  }
+  return (
+    <FinderResults
+      listId={listId}
+      options={finding.options}
+      agents={finding.agents}
+      selectedIndex={finding.selectedIndex}
+      onOpen={onOpen}
+    />
+  );
+}
+
 export function FinderDialog({
   search,
   onOpenThread,
   onNarrowTo,
   onClose,
+  commands,
 }: {
   search: Search;
   onOpenThread: (messageId: string) => void;
   onNarrowTo: (channel: string) => void;
   onClose: () => void;
+  commands: Command[];
 }) {
   const listId = useId();
   const box = useRef<HTMLInputElement>(null);
   const scrim = useRef<HTMLDivElement>(null);
-  const { query, shown, typeIntoTheBox, moveSelection } =
-    useAnswersAsTheQueryChanges(search);
+  const finding = useFinding(search, commands);
+  const { typeQuery, moveSelection } = finding;
+  const typeIntoTheBox = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      typeQuery(event.target.value);
+    },
+    [typeQuery],
+  );
   const open = useOpeningOf(onOpenThread, onNarrowTo, onClose);
-  const selected = shown.options[shown.selectedIndex];
+  const selected = finding.options[finding.selectedIndex];
   const openTheSelection = useCallback(() => {
     if (selected !== undefined) {
       open(selected);
@@ -257,20 +236,12 @@ export function FinderDialog({
         <QueryBox
           box={box}
           listId={listId}
-          query={query}
-          shown={shown}
+          query={finding.query}
+          selection={finding}
           onType={typeIntoTheBox}
           onKey={takeTheKey}
         />
-        {shown.query.trim() !== "" && (
-          <FinderResults
-            listId={listId}
-            options={shown.options}
-            agents={shown.agents}
-            selectedIndex={shown.selectedIndex}
-            onOpen={open}
-          />
-        )}
+        <ListWhenShown listId={listId} finding={finding} onOpen={open} />
         <Foot />
       </div>
     </div>

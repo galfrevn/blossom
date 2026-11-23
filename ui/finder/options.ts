@@ -1,22 +1,36 @@
+import type { Command } from "../commands";
 import type {
   FoundChannel,
   FoundMessage,
   FoundTask,
   SearchResults,
+  TextPart,
 } from "../core/contract";
+import { matchOf } from "./matching";
 
-export type FinderOption =
-  | { kind: "channel"; found: FoundChannel }
-  | { kind: "task"; found: FoundTask }
-  | { kind: "message"; found: FoundMessage };
+type CommandOption = { kind: "command"; command: Command; marked: TextPart[] };
 
-export type FinderGroup = {
-  kind: FinderOption["kind"];
-  firstIndex: number;
-  options: FinderOption[];
+type Matched = {
+  well: CommandOption[];
+  weakly: CommandOption[];
 };
 
-export function optionsOf(results: SearchResults): FinderOption[] {
+function commandsMatching(commands: Command[], query: string): Matched {
+  const matched: Matched = { well: [], weakly: [] };
+  for (const command of commands) {
+    const match = matchOf(command.title, query);
+    if (match !== undefined) {
+      matched[match.quality].push({
+        kind: "command",
+        command,
+        marked: match.marked,
+      });
+    }
+  }
+  return matched;
+}
+
+function resultOptionsOf(results: SearchResults): FinderOption[] {
   const channels = results.channels.map(
     (found): FinderOption => ({ kind: "channel", found }),
   );
@@ -29,20 +43,54 @@ export function optionsOf(results: SearchResults): FinderOption[] {
   return [...channels, ...tasks, ...messages];
 }
 
+function groupNameOf(option: FinderOption): GroupName {
+  if (option.kind === "command") {
+    return option.command.group;
+  }
+  return option.kind;
+}
+
+export type FinderOption =
+  | CommandOption
+  | { kind: "channel"; found: FoundChannel }
+  | { kind: "task"; found: FoundTask }
+  | { kind: "message"; found: FoundMessage };
+
+export type GroupName = Command["group"] | "channel" | "task" | "message";
+
+export type FinderGroup = {
+  name: GroupName;
+  firstIndex: number;
+  options: FinderOption[];
+};
+
+export function optionsOf(
+  commands: Command[],
+  query: string,
+  results: SearchResults,
+): FinderOption[] {
+  const matched = commandsMatching(commands, query);
+  return [...matched.well, ...resultOptionsOf(results), ...matched.weakly];
+}
+
 export function groupsOf(options: FinderOption[]): FinderGroup[] {
   const groups: FinderGroup[] = [];
   for (const [index, option] of options.entries()) {
+    const name = groupNameOf(option);
     const group = groups.at(-1);
-    if (group?.kind === option.kind) {
+    if (group?.name === name) {
       group.options.push(option);
     } else {
-      groups.push({ kind: option.kind, firstIndex: index, options: [option] });
+      groups.push({ name, firstIndex: index, options: [option] });
     }
   }
   return groups;
 }
 
 export function keyOf(option: FinderOption): string {
+  if (option.kind === "command") {
+    return `command:${option.command.id}`;
+  }
   if (option.kind === "channel") {
     return `channel:${option.found.path}`;
   }

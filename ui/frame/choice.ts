@@ -2,6 +2,7 @@ import { useCallback, useReducer } from "react";
 
 type Change =
   | { kind: "lens"; lens: Lens }
+  | { kind: "show"; lens: Lens }
   | { kind: "channel"; channel: string }
   | { kind: "narrow"; channel: string }
   | { kind: "widen" };
@@ -14,6 +15,9 @@ function choiceAfter(choice: Choice, change: Change): Choice {
   }
   if (change.kind === "narrow") {
     return { ...choice, channel: change.channel };
+  }
+  if (change.kind === "show") {
+    return { ...choice, lens: change.lens };
   }
   if (change.kind === "lens") {
     if (change.lens === choice.lens) {
@@ -44,10 +48,14 @@ export function useChoice() {
     (channel: string) => change({ kind: "channel", channel }),
     [],
   );
+  const showLens = useCallback(
+    (lens: Lens) => change({ kind: "show", lens }),
+    [],
+  );
   const narrowTo = useCallback(
     (channel: string) => change({ kind: "narrow", channel }),
     [],
   );
   const widen = useCallback(() => change({ kind: "widen" }), []);
-  return { choice, chooseLens, chooseChannel, narrowTo, widen };
+  return { choice, chooseLens, showLens, chooseChannel, narrowTo, widen };
 }

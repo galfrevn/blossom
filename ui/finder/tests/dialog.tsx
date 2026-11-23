@@ -79,6 +79,7 @@ function renderFinderOver(search: (query: string) => Promise<SearchResults>) {
       onOpenThread={opened.threads}
       onNarrowTo={opened.channels}
       onClose={opened.closings}
+      commands={[]}
     />,
   );
   return opened;

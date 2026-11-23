@@ -3,6 +3,7 @@ import type { TaskChange, TaskCount } from "../core/contract";
 import { dictionary } from "../dictionary";
 import type { Lens } from "./choice";
 import { CountBeside, type TaskCounting } from "./count";
+import { LENSES, type LensEntry } from "./lenses";
 
 const INDENT_FOR_EACH_DEPTH = [
   "pl-2",
@@ -92,27 +93,10 @@ function TasksIcon() {
   );
 }
 
-type LensEntry = {
-  lens: Lens;
-  name: string;
-  key: string;
-  icon: () => React.ReactNode;
+const ICON_OF_EACH_LENS: Record<Lens, () => React.ReactNode> = {
+  flow: FlowIcon,
+  tasks: TasksIcon,
 };
-
-const LENS_ENTRIES: LensEntry[] = [
-  {
-    lens: "flow",
-    name: dictionary.lenses.flow.title,
-    key: "2",
-    icon: FlowIcon,
-  },
-  {
-    lens: "tasks",
-    name: dictionary.lenses.tasks.title,
-    key: "3",
-    icon: TasksIcon,
-  },
-];
 
 function isTypingInto(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
@@ -133,9 +117,7 @@ function useLensKeys(onChooseLens: (lens: Lens) => void) {
       if (pressedWithModifiers || isTypingInto(event.target)) {
         return;
       }
-      const entry = LENS_ENTRIES.find(
-        (candidate) => candidate.key === event.key,
-      );
+      const entry = LENSES.find((candidate) => candidate.key === event.key);
       if (entry !== undefined) {
         onChooseLens(entry.lens);
       }
@@ -213,7 +195,7 @@ function LensButton({
     [onChoose, entry.lens],
   );
   const countId = useId();
-  const Icon = entry.icon;
+  const Icon = ICON_OF_EACH_LENS[entry.lens];
   return (
     <button
       type="button"
@@ -265,7 +247,7 @@ export function Sidebar({
       <section>
         <Heading id={lensesHeading}>{text.lenses}</Heading>
         <ul aria-labelledby={lensesHeading} className="flex flex-col gap-px">
-          {LENS_ENTRIES.map((entry) => (
+          {LENSES.map((entry) => (
             <li key={entry.lens}>
               <LensButton
                 entry={entry}

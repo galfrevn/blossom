@@ -87,3 +87,24 @@ test("narrowing to a channel keeps it narrowed when it is already the one chosen
     channel: "fleet/www",
   });
 });
+
+test("showing a lens never widens the one on screen", () => {
+  const { result } = renderChoice();
+
+  act(() => {
+    result.current.narrowTo("fleet/www");
+  });
+  act(() => {
+    result.current.showLens("flow");
+  });
+  const stillNarrowed = result.current.choice;
+  act(() => {
+    result.current.showLens("tasks");
+  });
+
+  expect(stillNarrowed).toEqual({ lens: "flow", channel: "fleet/www" });
+  expect(result.current.choice).toEqual({
+    lens: "tasks",
+    channel: "fleet/www",
+  });
+});

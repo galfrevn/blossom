@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { Command } from "../commands";
 import type { SearchResults } from "../core/contract";
 import { dictionary } from "../dictionary";
 import { FinderDialog } from "./dialog";
@@ -29,12 +30,14 @@ function OpenFinder({
   onOpenThread,
   onNarrowTo,
   onClose,
+  commands,
 }: {
   isOpen: boolean;
   search: (query: string) => Promise<SearchResults>;
   onOpenThread: (messageId: string) => void;
   onNarrowTo: (channel: string) => void;
   onClose: () => void;
+  commands: Command[];
 }) {
   if (!isOpen) {
     return null;
@@ -45,6 +48,7 @@ function OpenFinder({
       onOpenThread={onOpenThread}
       onNarrowTo={onNarrowTo}
       onClose={onClose}
+      commands={commands}
     />
   );
 }
@@ -53,10 +57,12 @@ export function FinderBox({
   search,
   onOpenThread,
   onNarrowTo,
+  commands,
 }: {
   search: (query: string) => Promise<SearchResults>;
   onOpenThread: (messageId: string) => void;
   onNarrowTo: (channel: string) => void;
+  commands: Command[];
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const open = useCallback(() => setIsOpen(true), []);
@@ -83,6 +89,7 @@ export function FinderBox({
         onOpenThread={onOpenThread}
         onNarrowTo={onNarrowTo}
         onClose={close}
+        commands={commands}
       />
     </>
   );

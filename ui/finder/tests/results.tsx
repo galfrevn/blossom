@@ -1,5 +1,6 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import type { Command } from "../../commands";
 import type {
   FoundAgent,
   FoundChannel,
@@ -96,6 +97,8 @@ function markedWordsOf(option: HTMLElement) {
 test("results are grouped: channels, tasks, messages, then agents", () => {
   renderResults(
     optionsOf(
+      [],
+      "",
       resultsOf({
         messages: [foundMessage],
         tasks: [foundTask],
@@ -120,7 +123,7 @@ test("results are grouped: channels, tasks, messages, then agents", () => {
 });
 
 test("a group with nothing found is left out", () => {
-  renderResults(optionsOf(resultsOf({ messages: [foundMessage] })));
+  renderResults(optionsOf([], "", resultsOf({ messages: [foundMessage] })));
 
   const groups = screen
     .getAllByRole("group")
@@ -132,6 +135,8 @@ test("a group with nothing found is left out", () => {
 test("in every result, the words that matched are marked", () => {
   renderResults(
     optionsOf(
+      [],
+      "",
       resultsOf({
         messages: [foundMessage],
         tasks: [foundTask],
@@ -144,7 +149,7 @@ test("in every result, the words that matched are marked", () => {
 });
 
 test("a channel reads as its path", () => {
-  renderResults(optionsOf(resultsOf({ channels: [foundChannel] })));
+  renderResults(optionsOf([], "", resultsOf({ channels: [foundChannel] })));
 
   const [option] = everyOption();
 
@@ -152,7 +157,7 @@ test("a channel reads as its path", () => {
 });
 
 test("a task says its state and its channel", () => {
-  renderResults(optionsOf(resultsOf({ tasks: [foundTask] })));
+  renderResults(optionsOf([], "", resultsOf({ tasks: [foundTask] })));
 
   const [option] = everyOption();
 
@@ -162,7 +167,7 @@ test("a task says its state and its channel", () => {
 });
 
 test("a message says who wrote it, where and when", () => {
-  renderResults(optionsOf(resultsOf({ messages: [foundMessage] })));
+  renderResults(optionsOf([], "", resultsOf({ messages: [foundMessage] })));
 
   const [option] = everyOption();
 
@@ -174,7 +179,11 @@ test("a message says who wrote it, where and when", () => {
 
 test("the selected result is the one marked as selected", () => {
   renderResults(
-    optionsOf(resultsOf({ tasks: [foundTask], channels: [foundChannel] })),
+    optionsOf(
+      [],
+      "",
+      resultsOf({ tasks: [foundTask], channels: [foundChannel] }),
+    ),
     1,
   );
 
@@ -188,6 +197,8 @@ test("the selected result is the one marked as selected", () => {
 
 test("a click on a result opens it", () => {
   const options = optionsOf(
+    [],
+    "",
     resultsOf({ tasks: [foundTask], channels: [foundChannel] }),
   );
   const onOpen = vi.fn();
@@ -210,7 +221,11 @@ test("the selected result is brought into view as the selection moves", () => {
       scrolledIntoView.push(this.id);
     });
   const results = renderResults(
-    optionsOf(resultsOf({ tasks: [foundTask], channels: [foundChannel] })),
+    optionsOf(
+      [],
+      "",
+      resultsOf({ tasks: [foundTask], channels: [foundChannel] }),
+    ),
   );
 
   results.select(1);
@@ -250,4 +265,24 @@ test("only a query that finds nothing at all says so", () => {
   renderResults([], 0, vi.fn(), [foundAgent]);
 
   expect(screen.queryByText(dictionary.finder.noMatch)).toBeNull();
+});
+
+test("a command reads as its title, the words typed marked, with its shortcut beside it", () => {
+  const goToTasks: Command = {
+    id: "lens:tasks",
+    group: "lenses",
+    title: "Go to Tasks",
+    shortcut: "3",
+    run: vi.fn(),
+  };
+  renderResults(optionsOf([goToTasks], "tas", resultsOf({})));
+
+  const [option] = everyOption();
+
+  expect(option?.textContent).toBe("Go to Tasks3");
+  expect(everyOption().map(markedWordsOf)).toEqual([["Tas"]]);
+  expect(option?.querySelector("kbd")?.textContent).toBe("3");
+  expect(screen.getByRole("group").getAttribute("aria-label")).toBe(
+    dictionary.commands.groups.lenses,
+  );
 });

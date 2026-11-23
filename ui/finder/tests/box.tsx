@@ -6,6 +6,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import type { Command } from "../../commands";
 import type { SearchResults } from "../../core/contract";
 import { createFakeCore } from "../../core/fake";
 import { dictionary } from "../../dictionary";
@@ -30,7 +31,14 @@ const foundOneTask: SearchResults = {
 function renderTheBox() {
   const fakeCore = createFakeCore();
   fakeCore.answerSearch("www", foundOneTask);
-  const opened = { threads: vi.fn(), channels: vi.fn() };
+  const opened = { threads: vi.fn(), channels: vi.fn(), tasks: vi.fn() };
+  const goToTasks: Command = {
+    id: "lens:tasks",
+    group: "lenses",
+    title: "Go to Tasks",
+    shortcut: "3",
+    run: opened.tasks,
+  };
   render(
     <>
       <input aria-label="Filter by title" />
@@ -38,6 +46,7 @@ function renderTheBox() {
         search={fakeCore.core.search}
         onOpenThread={opened.threads}
         onNarrowTo={opened.channels}
+        commands={[goToTasks]}
       />
     </>,
   );
@@ -133,4 +142,18 @@ test("closing the finder gives the keyboard back to where it was", () => {
 
   expect(theFinder()).toBeNull();
   expect(document.activeElement).toBe(filter);
+});
+
+test("Enter on a command runs it, and the finder closes", () => {
+  const opened = renderTheBox();
+  pressCommandK();
+
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "tas" } });
+  act(() => {
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+  });
+
+  expect(opened.tasks).toHaveBeenCalledOnce();
+  expect(opened.threads).not.toHaveBeenCalled();
+  expect(theFinder()).toBeNull();
 });

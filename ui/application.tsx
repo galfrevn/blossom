@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useCommands } from "./commands";
 import type { Clock } from "./core/clock";
 import type {
   FlowChange,
@@ -141,8 +142,10 @@ export function Application({
   const channels = useStore(channelsStore);
   const flowChange = useStore(flowStore);
   const taskChange = useStore(tasksStore);
-  const { choice, chooseLens, chooseChannel, narrowTo, widen } = useChoice();
+  const { choice, chooseLens, showLens, chooseChannel, narrowTo, widen } =
+    useChoice();
   const [threadOpenings] = useState(createThreadOpenings);
+  const commands = useCommands(choice, showLens, widen);
   return (
     <div className="flex h-screen flex-col bg-paper text-ink">
       <TitleBar>
@@ -151,6 +154,7 @@ export function Application({
             search={search}
             onOpenThread={threadOpenings.open}
             onNarrowTo={narrowTo}
+            commands={commands}
           />
         )}
       </TitleBar>

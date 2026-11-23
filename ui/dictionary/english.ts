@@ -142,11 +142,18 @@ export const english = {
     noTasks: "No tasks on this board yet",
     noneMatch: "No task matches",
   },
+  commands: {
+    groups: {
+      lenses: "Lenses",
+      actions: "Actions",
+    },
+    goTo: (lens: string) => `Go to ${lens}`,
+  },
   finder: {
-    box: "Search the board",
+    box: "Search or run a command",
     boxKey: "⌘K",
-    title: "Search the board",
-    placeholder: "Find a message, a task or a channel",
+    title: "Search or run a command",
+    placeholder: "Go to a lens, find a task, or run a command",
     groups: {
       channels: "Channels",
       tasks: "Tasks",
@@ -160,7 +167,7 @@ export const english = {
       `${author} · #${channel} · ${dayOfTheMonth.format(new Date(createdAt))}`,
     noMatch: "No match",
     move: "↑↓ move",
-    open: "↵ open",
+    run: "↵ run",
     close: "esc close",
   },
   thread: {

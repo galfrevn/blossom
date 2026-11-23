@@ -10,13 +10,16 @@ import { looksOf } from "../tasks/states";
 import {
   type FinderGroup,
   type FinderOption,
+  type GroupName,
   groupsOf,
   keyOf,
 } from "./options";
 
 type ListElement = React.RefObject<HTMLDivElement | null>;
 
-const GROUP_NAMES: Record<FinderOption["kind"], string> = {
+const GROUP_NAMES: Record<GroupName, string> = {
+  lenses: dictionary.commands.groups.lenses,
+  actions: dictionary.commands.groups.actions,
   channel: dictionary.finder.groups.channels,
   task: dictionary.finder.groups.tasks,
   message: dictionary.finder.groups.messages,
@@ -69,6 +72,16 @@ function MessageHint({ found }: { found: FoundMessage }) {
 }
 
 function OptionContent({ option }: { option: FinderOption }) {
+  if (option.kind === "command") {
+    return (
+      <>
+        <span className={LABEL}>
+          <Marked parts={option.marked} />
+        </span>
+        <kbd className={HINT}>{option.command.shortcut}</kbd>
+      </>
+    );
+  }
   if (option.kind === "channel") {
     return (
       <span className={LABEL}>
@@ -106,7 +119,7 @@ function Group({
   listId: string;
   selectedIndex: number;
 }) {
-  const name = GROUP_NAMES[group.kind];
+  const name = GROUP_NAMES[group.name];
   return (
     <fieldset aria-label={name} className="min-w-0">
       <div aria-hidden={true} className={GROUP_HEADING}>
@@ -251,7 +264,7 @@ export function FinderResults({
       )}
       {groupsOf(options).map((group) => (
         <Group
-          key={group.kind}
+          key={`${group.name}:${group.firstIndex}`}
           group={group}
           listId={listId}
           selectedIndex={selectedIndex}
