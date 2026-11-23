@@ -31,6 +31,7 @@ function renderFlowOf(rows: FlowRow[], channel: string | null = null) {
       channel={channel}
       boardUrl={BOARD_URL}
       readFlow={fakeCore.core.readFlow}
+      countFlowBefore={fakeCore.core.countFlowBefore}
       countFlowAfter={fakeCore.core.countFlowAfter}
       selectedMessage={undefined}
       onSelect={selectNothing}

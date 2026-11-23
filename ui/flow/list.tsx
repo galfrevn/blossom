@@ -7,12 +7,19 @@ import { useLayoutAfterDrawing, useScrollFollowing } from "./scroll";
 import { useSelectionByArrows, useSelectionByClicks } from "./selection";
 import {
   followTheChange,
+  followTheMove,
   followTheTotal,
   type ListState,
   newBelowOf,
   rangeOnScreen,
   useListState,
 } from "./state";
+
+type CountFlow = (
+  channel: string | null,
+  createdAt: string,
+  id: string,
+) => Promise<number>;
 
 const Placeholder = memo(function PlaceholderRow({ index }: { index: number }) {
   return (
@@ -123,6 +130,7 @@ export function FlowList({
   channel,
   boardUrl,
   readFlow,
+  countFlowBefore,
   countFlowAfter,
   selectedMessage,
   onSelect,
@@ -135,11 +143,8 @@ export function FlowList({
     start: number,
     count: number,
   ) => Promise<FlowWindow>;
-  countFlowAfter: (
-    channel: string | null,
-    createdAt: string,
-    id: string,
-  ) => Promise<number>;
+  countFlowBefore: CountFlow;
+  countFlowAfter: CountFlow;
   selectedMessage: string | undefined;
   onSelect: (messageId: string) => void;
 }) {
@@ -150,11 +155,23 @@ export function FlowList({
     (start: number, count: number) => readFlow(channel, start, count),
     [readFlow, channel],
   );
+  const countThisFlowBefore = useCallback(
+    (createdAt: string, id: string) => countFlowBefore(channel, createdAt, id),
+    [countFlowBefore, channel],
+  );
   const countThisFlowAfter = useCallback(
     (createdAt: string, id: string) => countFlowAfter(channel, createdAt, id),
     [countFlowAfter, channel],
   );
-  const state = useListState(readThisFlow, countThisFlowAfter, redraw);
+  const state = useListState(
+    {
+      readFlow: readThisFlow,
+      countFlowBefore: countThisFlowBefore,
+      countFlowAfter: countThisFlowAfter,
+    },
+    redraw,
+  );
+  followTheMove(state);
   followTheChange(state, change);
   followTheTotal(state);
   const range = rangeOnScreen(state);

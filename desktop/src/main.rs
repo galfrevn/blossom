@@ -226,6 +226,19 @@ impl Session {
         Ok(reader.flow_lines_after_in(channel, created_at, id))
     }
 
+    fn count_flow_before(
+        &self,
+        channel: Option<&str>,
+        created_at: &str,
+        id: &str,
+    ) -> Result<u32, String> {
+        let reader = self.reader.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(reader) = reader.as_ref() else {
+            return Err(String::from("no replica is open"));
+        };
+        Ok(reader.flow_lines_before_in(channel, created_at, id))
+    }
+
     fn read_thread(&self, message_id: &str) -> Result<Option<Thread>, String> {
         let reader = self.reader.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(reader) = reader.as_ref() else {
@@ -307,6 +320,16 @@ fn count_flow_after(
     session: State<'_, Arc<Session>>,
 ) -> Result<u32, String> {
     session.count_flow_after(channel.as_deref(), &created_at, &id)
+}
+
+#[tauri::command]
+fn count_flow_before(
+    channel: Option<String>,
+    created_at: String,
+    id: String,
+    session: State<'_, Arc<Session>>,
+) -> Result<u32, String> {
+    session.count_flow_before(channel.as_deref(), &created_at, &id)
 }
 
 #[tauri::command(async)]
@@ -439,6 +462,7 @@ fn main() -> ExitCode {
             subscribe_to_fleet,
             read_flow,
             count_flow_after,
+            count_flow_before,
             read_thread,
             search,
             open_link,

@@ -59,6 +59,7 @@ function renderApplicationWhileTheCoreSays(said: {
       tasksStore={tasksStore}
       clock={createClock(ONE_SECOND)}
       readFlow={fakeCore.core.readFlow}
+      countFlowBefore={fakeCore.core.countFlowBefore}
       countFlowAfter={fakeCore.core.countFlowAfter}
       readThread={fakeCore.core.readThread}
       openLink={fakeCore.core.openLink}

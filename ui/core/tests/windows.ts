@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import type { Anchor } from "../places";
 import { type Window, Windows } from "../windows";
 
 const BOARD_SIZE = 1000;
@@ -204,4 +205,76 @@ test("a block asked for before the end was read is not shown once the end is", a
   expect(windows.rowAt(GROWN_BOARD_SIZE - 1)?.id).toBe(
     String(GROWN_BOARD_SIZE - 1),
   );
+});
+
+const LANDED_ABOVE = 150;
+
+function boardWhereOlderRowsLand() {
+  const board = { landedAbove: 0 };
+  const read = (start: number, count: number): Promise<Window<NumberedRow>> => {
+    const total = BOARD_SIZE + board.landedAbove;
+    const rows: NumberedRow[] = [];
+    for (
+      let index = start;
+      index < Math.min(total, start + count);
+      index += 1
+    ) {
+      rows.push(rowNumbered(index - board.landedAbove, "work"));
+    }
+    return Promise.resolve({ total, rows });
+  };
+  return { board, read };
+}
+
+function lineHeld(
+  board: { landedAbove: number },
+  id: number,
+): Anchor<NumberedRow> {
+  return {
+    find: () => Promise.resolve(id + board.landedAbove),
+    isAtOrAfter: (row) => Number(row.id) >= id,
+    rowsBefore: A_FEW_ROWS,
+    rowsAfter: A_FEW_ROWS,
+  };
+}
+
+test("away from the end, a change shows the rows around the line held, where it sits now, with the new total at once", async () => {
+  const { board, read } = boardWhereOlderRowsLand();
+  const windows = new Windows(read, ROWS_IN_A_BLOCK, ENOUGH_BLOCKS, nothing);
+  windows.need(SECOND_BLOCK, SECOND_BLOCK + A_FEW_ROWS);
+  await settle();
+  const found: number[] = [];
+
+  board.landedAbove = LANDED_ABOVE;
+  windows.renewAround(lineHeld(board, SECOND_BLOCK), (index) => {
+    found.push(index);
+  });
+  expect(windows.total()).toBe(BOARD_SIZE);
+  expect(windows.rowAt(SECOND_BLOCK)?.id).toBe(String(SECOND_BLOCK));
+  await settle();
+
+  const whereItSitsNow = SECOND_BLOCK + LANDED_ABOVE;
+  expect(found).toEqual([whereItSitsNow]);
+  expect(windows.total()).toBe(BOARD_SIZE + LANDED_ABOVE);
+  expect(windows.rowAt(whereItSitsNow)?.id).toBe(String(SECOND_BLOCK));
+  expect(windows.rowAt(SECOND_BLOCK)).toBeUndefined();
+});
+
+test("a change at the end while a line is held is read once the line is shown", async () => {
+  const { board, read } = boardWhereOlderRowsLand();
+  const windows = new Windows(read, ROWS_IN_A_BLOCK, ENOUGH_BLOCKS, nothing);
+  const found: number[] = [];
+
+  board.landedAbove = LANDED_ABOVE;
+  windows.renewAround(lineHeld(board, SECOND_BLOCK), (index) => {
+    found.push(index);
+  });
+  windows.renewTheEnd(A_FEW_ROWS);
+  expect(windows.isReadingThePlace()).toBe(true);
+  await settle();
+
+  const totalNow = BOARD_SIZE + LANDED_ABOVE;
+  expect(found).toEqual([SECOND_BLOCK + LANDED_ABOVE]);
+  expect(windows.isReadingThePlace()).toBe(false);
+  expect(windows.rowAt(totalNow - 1)?.id).toBe(String(BOARD_SIZE - 1));
 });

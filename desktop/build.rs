@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "subscribe_to_fleet",
         "read_flow",
         "count_flow_after",
+        "count_flow_before",
         "read_thread",
         "search",
         "open_link",

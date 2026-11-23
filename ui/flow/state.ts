@@ -3,7 +3,28 @@ import type { FlowChange, FlowRow, FlowWindow } from "../core/contract";
 import { Windows } from "../core/windows";
 import { NewMessagesBelow } from "./below";
 import { RowHeights } from "./heights";
+import { anchorAt, lineStartingAt, type Move, scrollTopAfter } from "./place";
 import type { WatchedRows } from "./watch";
+
+function takeTheChange(state: ListState, change: FlowChange) {
+  state.revision = change.revision;
+  state.heights.forgetMeasurements();
+}
+
+function holdTheLineOnScreen(state: ListState) {
+  const range = rangeOnScreen(state);
+  const index = lineStartingAt(state.heights, state.scrollTop);
+  const line = state.windows.rowAt(index);
+  if (line === undefined) {
+    state.windows.renew();
+    return;
+  }
+  const rowsAround = { before: index - range.first, after: range.last - index };
+  const anchor = anchorAt(line, state.countBefore, rowsAround);
+  state.windows.renewAround(anchor, (found) => {
+    state.move = { from: index, to: found };
+  });
+}
 
 export const ESTIMATED_ROW_HEIGHT = 46;
 export const ROWS_IN_A_BLOCK = 100;
@@ -20,6 +41,15 @@ export type ListState = {
   keepsToTheBottom: boolean;
   newBelow: NewMessagesBelow;
   watchedRows: WatchedRows | null;
+  countBefore: (createdAt: string, id: string) => Promise<number>;
+  move: Move | undefined;
+  wantedScrollTop: number | undefined;
+};
+
+export type FlowReads = {
+  readFlow: (start: number, count: number) => Promise<FlowWindow>;
+  countFlowBefore: (createdAt: string, id: string) => Promise<number>;
+  countFlowAfter: (createdAt: string, id: string) => Promise<number>;
 };
 
 export function isAtTheBottom(scroller: HTMLElement): boolean {
@@ -35,15 +65,38 @@ export function followTheChange(
   if (change === undefined || change.revision === state.revision) {
     return;
   }
-  state.revision = change.revision;
-  state.heights.forgetMeasurements();
   if (state.keepsToTheBottom) {
+    takeTheChange(state, change);
     const range = rangeOnScreen(state);
     state.windows.renewTheEnd(range.last - range.first + 1);
     return;
   }
-  state.windows.renew();
+  if (state.windows.isReadingThePlace()) {
+    return;
+  }
+  takeTheChange(state, change);
+  holdTheLineOnScreen(state);
   state.newBelow.recount();
+}
+
+export function followTheMove(state: ListState) {
+  const { move } = state;
+  if (move === undefined) {
+    return;
+  }
+  state.move = undefined;
+  const before = state.heights;
+  state.heights = before.resized(state.windows.total() ?? before.count);
+  if (state.keepsToTheBottom) {
+    return;
+  }
+  state.scrollTop = scrollTopAfter(
+    move,
+    before,
+    state.heights,
+    state.scrollTop,
+  );
+  state.wantedScrollTop = state.scrollTop;
 }
 
 export function followTheTotal(state: ListState) {
@@ -70,22 +123,26 @@ export function rangeOnScreen(state: ListState) {
   return { first, last };
 }
 
-export function useListState(
-  readFlow: (start: number, count: number) => Promise<FlowWindow>,
-  countFlowAfter: (createdAt: string, id: string) => Promise<number>,
-  redraw: () => void,
-): ListState {
+export function useListState(reads: FlowReads, redraw: () => void): ListState {
   const stateRef = useRef<ListState | null>(null);
   if (stateRef.current === null) {
     stateRef.current = {
       heights: new RowHeights(0, ESTIMATED_ROW_HEIGHT),
-      windows: new Windows(readFlow, ROWS_IN_A_BLOCK, BLOCKS_KEPT, redraw),
+      windows: new Windows(
+        reads.readFlow,
+        ROWS_IN_A_BLOCK,
+        BLOCKS_KEPT,
+        redraw,
+      ),
       revision: -1,
       scrollTop: 0,
       viewportHeight: 0,
       keepsToTheBottom: true,
-      newBelow: new NewMessagesBelow(countFlowAfter, redraw),
+      newBelow: new NewMessagesBelow(reads.countFlowAfter, redraw),
       watchedRows: null,
+      countBefore: reads.countFlowBefore,
+      move: undefined,
+      wantedScrollTop: undefined,
     };
   }
   return stateRef.current;

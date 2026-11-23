@@ -49,6 +49,13 @@ function comesAfter(row: FlowRow, createdAt: string, id: string): boolean {
   return row.id > id;
 }
 
+function comesBefore(row: FlowRow, createdAt: string, id: string): boolean {
+  if (row.createdAt !== createdAt) {
+    return row.createdAt < createdAt;
+  }
+  return row.id < id;
+}
+
 function threadHolding(threads: Thread[], messageId: string): Thread | null {
   const holding = threads.find((thread) =>
     thread.messages.some((message) => message.id === messageId),
@@ -138,6 +145,17 @@ function createFakeFlow() {
         start,
         rows: narrowed.slice(start, start + count),
       });
+    },
+    countFlowBefore: (
+      channel: string | null,
+      createdAt: string,
+      id: string,
+    ) => {
+      const before = flowRows.filter(
+        (row) =>
+          isWithin(row.channel, channel) && comesBefore(row, createdAt, id),
+      );
+      return Promise.resolve(before.length);
     },
     countFlowAfter: (channel: string | null, createdAt: string, id: string) => {
       const after = flowRows.filter(

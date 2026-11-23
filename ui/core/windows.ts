@@ -1,9 +1,21 @@
+import {
+  type Anchor,
+  type BlockReader,
+  type PlaceRead,
+  readAround,
+  readTheEnd,
+} from "./places";
+
 type Block<Row> = {
   rows: Row[];
   generation: number;
 };
 
-type ReadingOfTheEnd = "notReading" | "reading" | "readingAndRenewedSince";
+type ReadingOfThePlace = "notReading" | "reading" | "readingAndRenewedSince";
+
+type Place<Row> =
+  | { rowsAtTheEnd: number }
+  | { anchor: Anchor<Row>; onFound: (index: number) => void };
 
 export type Window<Row> = {
   total: number;
@@ -19,9 +31,9 @@ export class Windows<Row> {
   private readonly requested = new Map<number, number>();
   private generation = 0;
   private knownTotal: number | undefined;
-  private rowsAtTheEnd = 1;
-  private readingOfTheEnd: ReadingOfTheEnd = "notReading";
-  private generationWhenTheEndWasRead = 0;
+  private placeToRead: Place<Row> = { rowsAtTheEnd: 1 };
+  private readingOfThePlace: ReadingOfThePlace = "notReading";
+  private generationWhenThePlaceWasRead = 0;
 
   constructor(
     read: (start: number, count: number) => Promise<Window<Row>>,
@@ -41,7 +53,7 @@ export class Windows<Row> {
   }
 
   need(first: number, last: number): void {
-    if (this.readingOfTheEnd !== "notReading") {
+    if (this.isReadingThePlace()) {
       return;
     }
     const firstBlock = Math.floor(first / this.blockSize);
@@ -65,13 +77,15 @@ export class Windows<Row> {
   }
 
   renewTheEnd(rowsAtTheEnd: number): void {
-    this.generation += 1;
-    this.rowsAtTheEnd = Math.max(1, rowsAtTheEnd);
-    if (this.readingOfTheEnd !== "notReading") {
-      this.readingOfTheEnd = "readingAndRenewedSince";
-      return;
-    }
-    this.readTheEnd();
+    this.renewThePlace({ rowsAtTheEnd: Math.max(1, rowsAtTheEnd) });
+  }
+
+  renewAround(anchor: Anchor<Row>, onFound: (index: number) => void): void {
+    this.renewThePlace({ anchor, onFound });
+  }
+
+  isReadingThePlace(): boolean {
+    return this.readingOfThePlace !== "notReading";
   }
 
   total(): number | undefined {
@@ -84,7 +98,7 @@ export class Windows<Row> {
     this.read(block * this.blockSize, this.blockSize).then(
       (window) => {
         this.requested.delete(block);
-        if (generation < this.generationWhenTheEndWasRead) {
+        if (generation < this.generationWhenThePlaceWasRead) {
           return;
         }
         this.knownTotal = window.total;
@@ -100,72 +114,66 @@ export class Windows<Row> {
     );
   }
 
-  private readTheEnd(): void {
-    this.readingOfTheEnd = "reading";
-    this.generationWhenTheEndWasRead = this.generation;
-    this.readTheEndOf(this.knownTotal ?? 0);
-  }
-
-  private readTheEndOf(total: number): void {
-    const blocks = this.blocksAtTheEndOf(total);
-    const reads = blocks.map((block) =>
-      this.read(block * this.blockSize, this.blockSize),
-    );
-    Promise.all(reads).then(
-      (windows) => {
-        const totalNow = windows.at(-1)?.total ?? total;
-        const everyReadAgrees = windows.every(
-          (window) => window.total === totalNow,
-        );
-        const endNow = this.blocksAtTheEndOf(totalNow);
-        const theEndIsWhatWasRead =
-          endNow.length === blocks.length &&
-          endNow.every((block, index) => block === blocks[index]);
-        if (!(everyReadAgrees && theEndIsWhatWasRead)) {
-          this.readTheEndOf(totalNow);
-          return;
-        }
-        this.showTheEnd(blocks, windows, totalNow);
-      },
-      (error: unknown) => {
-        this.readingOfTheEnd = "notReading";
-        console.error("blossom: the end of the list could not be read", error);
-      },
-    );
-  }
-
-  private showTheEnd(
-    blocks: number[],
-    windows: Window<Row>[],
-    total: number,
-  ): void {
-    this.blocks.clear();
-    this.knownTotal = total;
-    const generation = this.generationWhenTheEndWasRead;
-    for (const [index, block] of blocks.entries()) {
-      this.blocks.set(block, { rows: windows[index]?.rows ?? [], generation });
+  private renewThePlace(place: Place<Row>): void {
+    this.generation += 1;
+    this.placeToRead = place;
+    if (this.isReadingThePlace()) {
+      this.readingOfThePlace = "readingAndRenewedSince";
+      return;
     }
-    if (this.readingOfTheEnd === "readingAndRenewedSince") {
-      this.readTheEnd();
+    this.readThePlace();
+  }
+
+  private readThePlace(): void {
+    this.readingOfThePlace = "reading";
+    this.generationWhenThePlaceWasRead = this.generation;
+    const place = this.placeToRead;
+    const stop = (error: unknown) => {
+      this.stopReadingThePlace(error);
+    };
+    if ("anchor" in place) {
+      readAround(place.anchor, this.blockReader()).then(({ read, index }) => {
+        place.onFound(index);
+        this.showThePlace(read);
+      }, stop);
+      return;
+    }
+    readTheEnd(
+      this.knownTotal ?? 0,
+      place.rowsAtTheEnd,
+      this.blockReader(),
+    ).then((read) => {
+      this.showThePlace(read);
+    }, stop);
+  }
+
+  private blockReader(): BlockReader<Row> {
+    return {
+      read: (block) => this.read(block * this.blockSize, this.blockSize),
+      size: this.blockSize,
+    };
+  }
+
+  private showThePlace(read: PlaceRead<Row>): void {
+    this.blocks.clear();
+    this.knownTotal = read.total;
+    const generation = this.generationWhenThePlaceWasRead;
+    for (const [index, block] of read.blocks.entries()) {
+      const rows = read.windows[index]?.rows ?? [];
+      this.blocks.set(block, { rows, generation });
+    }
+    if (this.readingOfThePlace === "readingAndRenewedSince") {
+      this.readThePlace();
     } else {
-      this.readingOfTheEnd = "notReading";
+      this.readingOfThePlace = "notReading";
     }
     this.onArrival();
   }
 
-  private blocksAtTheEndOf(total: number): number[] {
-    const firstRow = Math.max(0, total - this.rowsAtTheEnd);
-    const lastRow = Math.max(0, total - 1);
-    const blocks: number[] = [];
-    const lastBlock = Math.floor(lastRow / this.blockSize);
-    for (
-      let block = Math.floor(firstRow / this.blockSize);
-      block <= lastBlock;
-      block += 1
-    ) {
-      blocks.push(block);
-    }
-    return blocks;
+  private stopReadingThePlace(error: unknown): void {
+    this.readingOfThePlace = "notReading";
+    console.error("blossom: the rows around a place could not be read", error);
+    this.onArrival();
   }
 
   private letGoOfTheOldest(): void {

@@ -809,6 +809,103 @@ fn a_fold_that_grew_after_a_message_is_one_line_after_it() {
 }
 
 #[test]
+fn a_line_is_found_again_below_the_older_messages_that_landed_above_it() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            view_at("2", 2, 0, "second").unwrap(),
+            view_at("3", 3, 0, "third").unwrap(),
+            view_at("4", 4, 0, "fourth").unwrap(),
+        ]))
+        .unwrap();
+    let mut reader = ReplicaReader::open(&file).unwrap();
+    let line = reader.flow_window_in(None, 1, 1).unwrap().rows.remove(0);
+    assert_eq!(
+        reader.flow_lines_before_in(None, &line.created_at, &line.id),
+        1
+    );
+
+    replica
+        .apply(&Batch::from_views(vec![
+            view_at("1", 1, 0, "older").unwrap(),
+            view_at("0", 0, 0, "oldest").unwrap(),
+            view_at("5", 5, 0, "newer").unwrap(),
+        ]))
+        .unwrap();
+    reader.catch_up().unwrap();
+    let index = reader.flow_lines_before_in(None, &line.created_at, &line.id);
+
+    assert_eq!(index, 3);
+    assert_eq!(
+        ids_of(&reader.flow_window_in(None, index, 1).unwrap()),
+        vec!["3"]
+    );
+}
+
+#[test]
+fn a_line_is_found_among_the_lines_of_its_narrowed_flow() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            view_in_at("fleet/www", "1", 1).unwrap(),
+            view_in_at("general", "2", 2).unwrap(),
+            view_in_at("fleet/api", "3", 3).unwrap(),
+            view_in_at("fleet/www", "4", 4).unwrap(),
+        ]))
+        .unwrap();
+    let mut reader = ReplicaReader::open(&file).unwrap();
+
+    replica
+        .apply(&Batch::from_views(vec![
+            view_in_at("general", "0", 0).unwrap(),
+            view_in_at("fleet/api", "00", 0).unwrap(),
+        ]))
+        .unwrap();
+    reader.catch_up().unwrap();
+    let index = reader.flow_lines_before_in(Some("fleet"), "2026-11-21T10:04:00.000Z", "4");
+
+    assert_eq!(index, 3);
+    assert_eq!(
+        ids_of(&reader.flow_window_in(Some("fleet"), index, 1).unwrap()),
+        vec!["4"]
+    );
+}
+
+#[test]
+fn a_fold_that_grew_away_leaves_its_place_to_the_line_that_came_after_it() {
+    let folder = TempDir::new().unwrap();
+    let file = folder.path().join("board.sqlite");
+    let mut replica = Replica::open(&file).unwrap();
+    replica
+        .apply(&Batch::from_views(vec![
+            root_task_in("fleet/www", "10", 0).unwrap(),
+            progress("11", "10", "fleet/www", 1, "claude").unwrap(),
+            root_in("general", "20", 2).unwrap(),
+        ]))
+        .unwrap();
+    let mut reader = ReplicaReader::open(&file).unwrap();
+    let fold = reader.flow_window_in(None, 1, 1).unwrap().rows.remove(0);
+
+    replica
+        .apply(&Batch::from_views(vec![
+            progress("12", "10", "fleet/www", 3, "codex").unwrap(),
+        ]))
+        .unwrap();
+    reader.catch_up().unwrap();
+    let index = reader.flow_lines_before_in(None, &fold.created_at, &fold.id);
+
+    assert_eq!(
+        shape_of(&reader.flow_window_in(None, 0, 10).unwrap()),
+        vec!["10", "20", "fold 2 of 2 in fleet/www"]
+    );
+    assert_eq!(index, 1);
+}
+
+#[test]
 fn a_thread_made_into_a_task_folds_the_progress_already_in_it_once_the_reader_catches_up() {
     let folder = TempDir::new().unwrap();
     let file = folder.path().join("board.sqlite");

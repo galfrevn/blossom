@@ -33,6 +33,11 @@ struct Narrowed {
     lines: Vec<usize>,
 }
 
+struct LinesSplit {
+    before: usize,
+    total: usize,
+}
+
 fn text_at<'row>(row: &'row Row<'_>, column: usize) -> rusqlite::Result<&'row str> {
     row.get_ref(column)?.as_str().map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(column, Type::Text, Box::new(error))
@@ -224,21 +229,35 @@ impl ReplicaReader {
         )
     }
 
+    pub fn flow_lines_before_in(&self, channel: Option<&str>, created_at: &str, id: &str) -> u32 {
+        let first_at_or_after = self
+            .flow
+            .partition_point(|message| message.comes_before(created_at, id));
+        let split = self.lines_split_at(channel, first_at_or_after);
+        u32::try_from(split.before).unwrap_or(u32::MAX)
+    }
+
     pub fn flow_lines_after_in(&self, channel: Option<&str>, created_at: &str, id: &str) -> u32 {
         let first_after = self
             .flow
             .partition_point(|message| !message.comes_after(created_at, id));
-        let ends_before = |line: &Line| line.latest().is_some_and(|latest| latest < first_after);
-        let lines_after = match channel {
-            None => self.lines.len() - self.lines.partition_point(ends_before),
-            Some(channel) => {
-                let lines = self.lines_within(channel);
-                let lines_before =
-                    lines.partition_point(|line| self.lines.get(*line).is_some_and(ends_before));
-                lines.len() - lines_before
-            }
+        let split = self.lines_split_at(channel, first_after);
+        u32::try_from(split.total - split.before).unwrap_or(u32::MAX)
+    }
+
+    fn lines_split_at(&self, channel: Option<&str>, position: usize) -> LinesSplit {
+        let ends_before = |line: &Line| line.latest().is_some_and(|latest| latest < position);
+        let Some(channel) = channel else {
+            return LinesSplit {
+                before: self.lines.partition_point(ends_before),
+                total: self.lines.len(),
+            };
         };
-        u32::try_from(lines_after).unwrap_or(u32::MAX)
+        let lines = self.lines_within(channel);
+        LinesSplit {
+            before: lines.partition_point(|line| self.lines.get(*line).is_some_and(ends_before)),
+            total: lines.len(),
+        }
     }
 
     fn lines_within(&self, channel: &str) -> Ref<'_, [usize]> {

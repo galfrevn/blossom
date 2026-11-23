@@ -23,10 +23,11 @@ function measure(scroller: HTMLElement, state: ListState) {
     const height = heightStillToMeasure(element, state, index);
     if (height > 0) {
       const top = state.heights.offsetOf(index);
+      const screenTop = state.scrollTop + shiftAbove;
       const change = state.heights.set(index, height);
       if (change !== 0) {
         changed = true;
-        if (top < state.scrollTop) {
+        if (top < screenTop) {
           shiftAbove += change;
         }
       }
@@ -150,9 +151,12 @@ export function useLayoutAfterDrawing(
     place(scroller, state);
     if (state.keepsToTheBottom && heights.count > 0) {
       scroller.scrollTop = scroller.scrollHeight;
+    } else if (state.wantedScrollTop !== undefined) {
+      scroller.scrollTop = state.wantedScrollTop + shiftAbove;
     } else if (shiftAbove !== 0) {
       scroller.scrollTop += shiftAbove;
     }
+    state.wantedScrollTop = undefined;
     const scrollMoved = scroller.scrollTop !== state.scrollTop;
     state.scrollTop = scroller.scrollTop;
     state.viewportHeight = scroller.clientHeight;

@@ -11,6 +11,7 @@ export function FlowLens({
   boardUrl,
   onWiden,
   readFlow,
+  countFlowBefore,
   countFlowAfter,
   readThread,
   openLink,
@@ -24,6 +25,11 @@ export function FlowLens({
     start: number,
     count: number,
   ) => Promise<FlowWindow>;
+  countFlowBefore: (
+    channel: string | null,
+    createdAt: string,
+    id: string,
+  ) => Promise<number>;
   countFlowAfter: (
     channel: string | null,
     createdAt: string,
@@ -51,6 +57,7 @@ export function FlowLens({
           channel={channel}
           boardUrl={boardUrl}
           readFlow={readFlow}
+          countFlowBefore={countFlowBefore}
           countFlowAfter={countFlowAfter}
           selectedMessage={selectedMessage}
           onSelect={setSelectedMessage}

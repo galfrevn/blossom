@@ -46,6 +46,8 @@ export function createTauriCore(): Core {
       subscribeOverChannel<Agent[]>("subscribe_to_fleet", listener),
     readFlow: (channel, start, count) =>
       invoke<FlowWindow>("read_flow", { channel, start, count }),
+    countFlowBefore: (channel, createdAt, id) =>
+      invoke<number>("count_flow_before", { channel, createdAt, id }),
     countFlowAfter: (channel, createdAt, id) =>
       invoke<number>("count_flow_after", { channel, createdAt, id }),
     readThread: (messageId) =>

@@ -27,6 +27,11 @@ export type Core = {
     start: number,
     count: number,
   ) => Promise<FlowWindow>;
+  countFlowBefore: (
+    channel: string | null,
+    createdAt: string,
+    id: string,
+  ) => Promise<number>;
   countFlowAfter: (
     channel: string | null,
     createdAt: string,

@@ -43,6 +43,7 @@ createRoot(rootElement).render(
       tasksStore={tasksStore}
       clock={clock}
       readFlow={core.readFlow}
+      countFlowBefore={core.countFlowBefore}
       countFlowAfter={core.countFlowAfter}
       readThread={core.readThread}
       openLink={core.openLink}
