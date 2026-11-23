@@ -141,6 +141,8 @@ export function Application({
             chosenLens={choice.lens}
             onChooseChannel={chooseChannel}
             onChooseLens={chooseLens}
+            taskChange={taskChange}
+            readTaskCounts={readTaskCounts}
           />
           <ChosenLens
             lens={choice.lens}

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId } from "react";
+import type { TaskChange, TaskCount } from "../core/contract";
 import { dictionary } from "../dictionary";
 import type { Lens } from "./choice";
+import { CountBeside, type TaskCounting } from "./count";
 
 const INDENT_FOR_EACH_DEPTH = [
   "pl-2",
@@ -199,20 +201,24 @@ function LensButton({
   entry,
   isChosen,
   onChoose,
+  counting,
 }: {
   entry: LensEntry;
   isChosen: boolean;
   onChoose: (lens: Lens) => void;
+  counting: TaskCounting;
 }) {
   const choose = useCallback(
     () => onChoose(entry.lens),
     [onChoose, entry.lens],
   );
+  const countId = useId();
   const Icon = entry.icon;
   return (
     <button
       type="button"
       aria-label={entry.name}
+      aria-describedby={countId}
       aria-current={lensCurrentnessOf(isChosen)}
       aria-keyshortcuts={entry.key}
       onClick={choose}
@@ -220,6 +226,7 @@ function LensButton({
     >
       <Icon />
       <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+      <CountBeside lens={entry.lens} id={countId} counting={counting} />
       <kbd className="min-w-4 rounded-[3px] border border-line bg-raised px-1 py-0.5 text-center font-mono text-[10px] text-ink-3 leading-none">
         {entry.key}
       </kbd>
@@ -233,14 +240,23 @@ export function Sidebar({
   chosenLens,
   onChooseChannel,
   onChooseLens,
+  taskChange,
+  readTaskCounts,
 }: {
   channels: string[];
   chosenChannel: string | null;
   chosenLens: Lens;
   onChooseChannel: (channel: string) => void;
   onChooseLens: (lens: Lens) => void;
+  taskChange: TaskChange | undefined;
+  readTaskCounts: (channel: string | null) => Promise<TaskCount[]>;
 }) {
   const text = dictionary.sidebar;
+  const counting: TaskCounting = {
+    channel: chosenChannel,
+    change: taskChange,
+    readTaskCounts,
+  };
   const lensesHeading = useId();
   const channelsHeading = useId();
   useLensKeys(onChooseLens);
@@ -255,6 +271,7 @@ export function Sidebar({
                 entry={entry}
                 isChosen={entry.lens === chosenLens}
                 onChoose={onChooseLens}
+                counting={counting}
               />
             </li>
           ))}

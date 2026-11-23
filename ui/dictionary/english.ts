@@ -67,6 +67,8 @@ export const english = {
     lenses: "Lenses",
     channels: "Channels",
     channel: (name: string) => `#${name}`,
+    openTasks: (openTasks: number) =>
+      plural(openTasks, "open task", "open tasks"),
   },
   lenses: {
     narrowedTo: (channel: string) => `in ${channel}`,

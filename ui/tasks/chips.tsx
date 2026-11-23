@@ -1,36 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import type { TaskChange, TaskCount } from "../core/contract";
 import { dictionary } from "../dictionary";
+import { useTaskCounts } from "./counts";
 import { looksOf } from "./states";
-
-function useCountsIn(
-  channel: string | null,
-  change: TaskChange | undefined,
-  readTaskCounts: (channel: string | null) => Promise<TaskCount[]>,
-): TaskCount[] {
-  const [counts, setCounts] = useState<TaskCount[]>([]);
-  const revision = change?.revision;
-  useEffect(() => {
-    if (revision === undefined) {
-      return;
-    }
-    let isTheLatestRead = true;
-    readTaskCounts(channel).then(
-      (counted) => {
-        if (isTheLatestRead) {
-          setCounts(counted);
-        }
-      },
-      (error: unknown) => {
-        console.error("blossom: the tasks could not be counted", error);
-      },
-    );
-    return () => {
-      isTheLatestRead = false;
-    };
-  }, [channel, revision, readTaskCounts]);
-  return counts;
-}
 
 function chipsToShow(
   counts: TaskCount[],
@@ -102,7 +74,7 @@ export function StateChips({
   onChoose: (state: string | null) => void;
   readTaskCounts: (channel: string | null) => Promise<TaskCount[]>;
 }) {
-  const counts = useCountsIn(channel, change, readTaskCounts);
+  const counts = useTaskCounts(channel, change, readTaskCounts) ?? [];
   return (
     <fieldset
       aria-label={dictionary.tasks.states}
