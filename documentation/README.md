@@ -51,6 +51,7 @@ documentation/
 | 0021 | CI checks everything on every push, on free runners, in under two minutes | accepted | [adr/architecture/pipeline.md](adr/architecture/pipeline.md) |
 | 0022 | Blossom gets a hosted board's token through the Vercel CLI | accepted | [adr/architecture/token.md](adr/architecture/token.md) |
 | 0023 | The page draws at the display's rate, through WebKit's own switch | accepted | [adr/architecture/rate.md](adr/architecture/rate.md) |
+| 0024 | The replica trims its logs of changes once the reader has read them | accepted | [adr/architecture/logs.md](adr/architecture/logs.md) |
 
 "Proposed" means the decision was recommended and shown but not confirmed explicitly. Purely technical decisions in the core were delegated to Claude and are recorded as accepted for review; they say so in their first line.
 
