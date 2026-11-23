@@ -24,6 +24,9 @@ The reader needs only the rows after its cursor. It lives in the same process as
 - A reader can never miss a change it has not read: the writer keeps every row after the lowest point read.
 - The two logs then hold what the readers have not read yet, usually nothing, however old the board is.
 - Trimming `arrivals` would first need the full-text index keyed by something else. That is a decision for another ADR, if the file's size ever calls for it.
+- **The two trimmed logs number their rows with `AUTOINCREMENT`** (schema version 9, Sync 06). A plain rowid starts again from 1 once a log is emptied, below what the readers have read, and they would skip every change after it.
+- **Readers tell the writer through a list kept in the process,** by the replica's file name as SQLite gives it. A reader joins it before it reads anything, holding every row, and says how far it read after it has built itself and after each catch-up. A reader that is opening can then never lose rows written after its first read.
+- **Only the follow's batches trim,** in their own transaction. A copy's batches delete nothing, and the first batch the follow stores after a copy deletes what the copy logged.
 
 ## Considered options
 

@@ -1,5 +1,6 @@
 mod actors;
 mod batch;
+pub(crate) mod logs;
 mod tasks;
 
 use std::cmp::Reverse;
@@ -214,7 +215,7 @@ impl From<rusqlite::Error> for ReplicaError {
 
 const WAIT_FOR_ANOTHER_CONNECTION: Duration = Duration::from_secs(2);
 
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 const SCHEMA: &str = "
     CREATE TABLE messages (
@@ -275,7 +276,7 @@ const SCHEMA: &str = "
     ) WITHOUT ROWID;
     CREATE INDEX tasks_by_claim ON tasks (claim_actor, claim_until);
     CREATE TABLE task_changes (
-        sequence INTEGER PRIMARY KEY,
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
         id TEXT NOT NULL
     );
     CREATE TRIGGER change_of_a_new_task AFTER INSERT ON tasks
@@ -287,7 +288,7 @@ const SCHEMA: &str = "
         INSERT INTO task_changes (id) VALUES (new.id);
     END;
     CREATE TABLE message_changes (
-        sequence INTEGER PRIMARY KEY,
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
         id TEXT NOT NULL
     );
     CREATE TRIGGER change_of_a_stored_message
@@ -474,6 +475,7 @@ impl Replica {
         let transaction = self.connection.transaction()?;
         let new_messages = store_batch(&transaction, batch)?;
         keep_feed_cursor(&transaction, feed_cursor)?;
+        logs::delete_what_every_open_reader_has_read(&transaction)?;
         transaction.commit()?;
         self.message_count = self.message_count.saturating_add(new_messages);
         Ok(())

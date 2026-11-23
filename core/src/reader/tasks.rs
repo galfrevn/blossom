@@ -161,6 +161,10 @@ impl TaskOrder {
         Ok(order)
     }
 
+    pub(super) fn last_change(&self) -> i64 {
+        self.last_change
+    }
+
     fn catch_up(&mut self, connection: &Connection) -> rusqlite::Result<bool> {
         let mut changed: HashMap<Box<str>, OrderedTask> = HashMap::new();
         let mut last_change = self.last_change;
@@ -240,7 +244,9 @@ impl TaskOrder {
 
 impl ReplicaReader {
     pub fn catch_up_tasks(&mut self) -> Result<bool, ReplicaError> {
-        Ok(self.tasks.catch_up(&self.connection)?)
+        let caught_up = self.tasks.catch_up(&self.connection)?;
+        self.tell_the_writer_how_far_it_has_read();
+        Ok(caught_up)
     }
 
     pub fn task_counts_in(&self, channel: Option<&str>) -> Vec<TaskCount> {

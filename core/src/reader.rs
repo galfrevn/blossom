@@ -14,6 +14,7 @@ use rusqlite::{CachedStatement, Connection, OpenFlags, Row, params};
 
 use crate::contract::{Agent, FlowFold, FlowRow, FlowWindow, SearchResults};
 use crate::replica::ReplicaError;
+use crate::replica::logs::{OpenReader, ReadPoint};
 use lines::{Line, OrderedMessage, lines_of, place_in_order, take_in_changes};
 use numbers::Numbers;
 use tasks::TaskOrder;
@@ -110,6 +111,7 @@ pub struct ReplicaReader {
     last_arrival: i64,
     last_message_change: i64,
     tasks: TaskOrder,
+    open_reader: OpenReader,
 }
 
 impl ReplicaReader {
@@ -118,6 +120,7 @@ impl ReplicaReader {
             file,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
+        let open_reader = OpenReader::of(&connection);
         let snapshot = connection.unchecked_transaction()?;
         let last_arrival = last_in(&snapshot, "arrivals")?;
         let last_message_change = last_in(&snapshot, "message_changes")?;
@@ -136,7 +139,7 @@ impl ReplicaReader {
         let tasks = TaskOrder::read(&snapshot)?;
         snapshot.commit()?;
         let lines = lines_of(&flow);
-        Ok(ReplicaReader {
+        let reader = ReplicaReader {
             connection,
             flow,
             lines,
@@ -147,7 +150,17 @@ impl ReplicaReader {
             last_arrival,
             last_message_change,
             tasks,
-        })
+            open_reader,
+        };
+        reader.tell_the_writer_how_far_it_has_read();
+        Ok(reader)
+    }
+
+    fn tell_the_writer_how_far_it_has_read(&self) {
+        self.open_reader.has_read(ReadPoint {
+            task_changes: self.tasks.last_change(),
+            message_changes: self.last_message_change,
+        });
     }
 
     pub fn is_read_only(&self) -> bool {
@@ -195,6 +208,7 @@ impl ReplicaReader {
         snapshot.commit()?;
         self.last_arrival = arrived.last;
         self.last_message_change = changed.last;
+        self.tell_the_writer_how_far_it_has_read();
         let anything_arrived = !arrived.messages.is_empty();
         place_in_order(&mut self.flow, arrived.messages);
         let anything_moved = take_in_changes(&mut self.flow, changed.messages);
