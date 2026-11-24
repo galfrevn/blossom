@@ -148,6 +148,20 @@ export const english = {
       actions: "Actions",
     },
     goTo: (lens: string) => `Go to ${lens}`,
+    showShortcuts: "Show the keyboard shortcuts",
+  },
+  shortcuts: {
+    title: "Keyboard shortcuts",
+    commands: "Commands",
+    moving: "Lists and the finder",
+    keys: [
+      { keys: "J", what: "Next line or row" },
+      { keys: "K", what: "Previous line or row" },
+      { keys: "↓ ↑", what: "Next or previous, also in the finder" },
+      { keys: "esc", what: "Close the pane, the finder or this sheet" },
+      { keys: "⌘K", what: "Search or run a command" },
+      { keys: "↵", what: "Run what the finder selected" },
+    ],
   },
   finder: {
     box: "Search or run a command",

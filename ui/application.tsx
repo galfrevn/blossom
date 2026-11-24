@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useCommands } from "./commands";
+import { useCallback, useState } from "react";
+import { type Command, useCommands } from "./commands";
 import type { Clock } from "./core/clock";
 import type {
   FlowChange,
@@ -15,9 +15,11 @@ import { type Store, useStore } from "./core/store";
 import { FinderBox } from "./finder/box";
 import { FlowLens } from "./flow/lens";
 import { type Lens, useChoice } from "./frame/choice";
+import { ShortcutSheet } from "./frame/sheet";
 import { Sidebar } from "./frame/sidebar";
 import { StatusBar } from "./frame/status";
 import { TitleBar } from "./frame/title";
+import { useShortcuts } from "./shortcuts";
 import { StartScreen } from "./start";
 import { TasksLens } from "./tasks/lens";
 import type { ReadTasks } from "./tasks/rows";
@@ -40,6 +42,48 @@ type ReadThread = (messageId: string) => Promise<Thread | null>;
 type OpenLink = (link: string) => Promise<void>;
 
 type Search = (query: string) => Promise<SearchResults>;
+
+const NO_COMMANDS: Command[] = [];
+
+function commandsWhile(boardIsOpen: boolean, commands: Command[]): Command[] {
+  if (!boardIsOpen) {
+    return NO_COMMANDS;
+  }
+  return commands;
+}
+
+function useChoiceWithCommands(boardIsOpen: boolean) {
+  const choosing = useChoice();
+  const { choice, showLens, widen } = choosing;
+  const [sheetIsOpen, setSheetIsOpen] = useState(false);
+  const showShortcuts = useCallback(() => setSheetIsOpen(true), []);
+  const closeTheSheet = useCallback(() => setSheetIsOpen(false), []);
+  const commands = useCommands(choice, { showLens, widen, showShortcuts });
+  useShortcuts(commandsWhile(boardIsOpen, commands));
+  return {
+    ...choosing,
+    commands,
+    sheet: { isOpen: boardIsOpen && sheetIsOpen, close: closeTheSheet },
+  };
+}
+
+type Sheet = {
+  isOpen: boolean;
+  close: () => void;
+};
+
+function SheetWhenOpen({
+  sheet,
+  commands,
+}: {
+  sheet: Sheet;
+  commands: Command[];
+}) {
+  if (!sheet.isOpen) {
+    return null;
+  }
+  return <ShortcutSheet commands={commands} onClose={sheet.close} />;
+}
 
 function ChosenLens({
   lens,
@@ -142,10 +186,8 @@ export function Application({
   const channels = useStore(channelsStore);
   const flowChange = useStore(flowStore);
   const taskChange = useStore(tasksStore);
-  const { choice, chooseLens, showLens, chooseChannel, narrowTo, widen } =
-    useChoice();
   const [threadOpenings] = useState(createThreadOpenings);
-  const commands = useCommands(choice, showLens, widen);
+  const choosing = useChoiceWithCommands(openBoard?.kind === "open");
   return (
     <div className="flex h-screen flex-col bg-paper text-ink">
       <TitleBar>
@@ -153,8 +195,8 @@ export function Application({
           <FinderBox
             search={search}
             onOpenThread={threadOpenings.open}
-            onNarrowTo={narrowTo}
-            commands={commands}
+            onNarrowTo={choosing.narrowTo}
+            commands={choosing.commands}
           />
         )}
       </TitleBar>
@@ -167,21 +209,21 @@ export function Application({
         <div className="flex min-h-0 flex-1">
           <Sidebar
             channels={channels ?? []}
-            chosenChannel={choice.channel}
-            chosenLens={choice.lens}
-            onChooseChannel={chooseChannel}
-            onChooseLens={chooseLens}
+            chosenChannel={choosing.choice.channel}
+            chosenLens={choosing.choice.lens}
+            onChooseChannel={choosing.chooseChannel}
+            onChooseLens={choosing.chooseLens}
             taskChange={taskChange}
             readTaskCounts={readTaskCounts}
           />
           <ChosenLens
-            lens={choice.lens}
-            channel={choice.channel}
+            lens={choosing.choice.lens}
+            channel={choosing.choice.channel}
             boardUrl={openBoard.url}
             flowChange={flowChange}
             taskChange={taskChange}
             clock={clock}
-            onWiden={widen}
+            onWiden={choosing.widen}
             readFlow={readFlow}
             countFlowBefore={countFlowBefore}
             countFlowAfter={countFlowAfter}
@@ -196,6 +238,7 @@ export function Application({
       {openBoard?.kind === "open" && (
         <StatusBar openBoard={openBoard} replicaState={replicaState} />
       )}
+      <SheetWhenOpen sheet={choosing.sheet} commands={choosing.commands} />
     </div>
   );
 }

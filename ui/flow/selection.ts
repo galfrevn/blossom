@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { arrowStepOf, comesFromTheList } from "../core/arrows";
+import { comesFromTheList, listStepOf } from "../core/arrows";
 import { recordTheScrollPosition } from "./scroll";
 import { type ListState, rangeOnScreen } from "./state";
 
@@ -114,7 +114,7 @@ export function useSelectionByArrows(
   }, [selectedMessage]);
   useEffect(() => {
     const moveTheSelection = (event: KeyboardEvent) => {
-      const step = arrowStepOf(event);
+      const step = listStepOf(event);
       const element = scroller.current;
       if (step === undefined || element === null) {
         return;

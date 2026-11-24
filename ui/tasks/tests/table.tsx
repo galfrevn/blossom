@@ -27,6 +27,7 @@ const A_THOUSAND_TASKS = 1000;
 const FEWER_THAN_A_TENTH = A_THOUSAND_TASKS / 10;
 const SCREEN = 600;
 const DEEP_ROW = 500;
+const ROWS_PAST_THE_SCREEN = 25;
 const A_ROW_HALF_A_SCREEN_INTO_THE_FIRST_WINDOW = 30;
 const FIRST_ROW_OF_THE_SECOND_WINDOW = 100;
 const EVERYTHING: TaskNarrowing = { channel: null, state: null, title: "" };
@@ -269,4 +270,20 @@ test("the arrow keys move the selection through the list", async () => {
   press("ArrowUp");
 
   expect(table.selections()).toEqual(["1", "2", "3", "2"]);
+});
+
+test("J and K move the selection as the arrows do, and the list scrolls to its row", async () => {
+  const ids = Array.from({ length: ROWS_PAST_THE_SCREEN }, (_, at) => `${at}`);
+  const table = renderTableOf(ids.map((id) => taskRow(id)));
+  await rowOf("0");
+  const scroller = pretendTheListIsOnScreen();
+
+  for (const _ of ids) {
+    press("j");
+  }
+  press("k");
+
+  expect(table.selections().slice(-2)).toEqual(["24", "23"]);
+  const bottomOfTheLastRow = HEADER_HEIGHT + ROWS_PAST_THE_SCREEN * ROW_HEIGHT;
+  expect(scroller.scrollTop).toBe(bottomOfTheLastRow - SCREEN);
 });

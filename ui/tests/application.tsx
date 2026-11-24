@@ -121,17 +121,18 @@ test("with no board running, it shows how to start one", () => {
   expect(screen.getByText("vb serve")).toBeDefined();
 });
 
-test("with a board open, the status bar shows its address and who you are on it", () => {
-  renderApplicationWhileTheCoreSays({ openBoard: boardOfAda });
+test("with a board open, the status bar shows its address, who you are on it and what the replica holds", () => {
+  renderApplicationWhileTheCoreSays({
+    openBoard: boardOfAda,
+    replicaState: { kind: "live", stored: 100_006 },
+  });
 
   expect(
     statusBar().getByText("http://127.0.0.1:4100/api/board"),
   ).toBeDefined();
   expect(statusBar().getByText("Ada Lovelace")).toBeDefined();
   expect(statusBar().getByText("@ada")).toBeDefined();
-  expect(
-    screen.queryByRole("heading", { name: "No board running" }),
-  ).toBeNull();
+  expect(statusBar().getByText("100,006 messages")).toBeDefined();
 });
 
 test("until the core answers, it shows neither screen", () => {
@@ -165,15 +166,6 @@ test("the screen follows the core as a board starts and stops", () => {
     screen.getByRole("heading", { name: "No board running" }),
   ).toBeDefined();
   expect(screen.queryByRole("contentinfo")).toBeNull();
-});
-
-test("while the replica follows the board, the status bar says how many messages it holds", () => {
-  renderApplicationWhileTheCoreSays({
-    openBoard: boardOfAda,
-    replicaState: { kind: "live", stored: 100_006 },
-  });
-
-  expect(statusBar().getByText("100,006 messages")).toBeDefined();
 });
 
 test("the lens says what it shows", () => {
@@ -219,7 +211,7 @@ test("selecting a line in Flow opens its thread in the pane, beside the lens", a
   expect(within(pane).getByText("deploy failed")).toBeDefined();
 });
 
-test("choosing a lens in the sidebar shows it, still narrowed to the chosen channel", () => {
+test("a lens's key shows it, still narrowed to the chosen channel", () => {
   renderApplicationWhileTheCoreSays({
     openBoard: boardOfAda,
     channels: ["fleet/www"],
@@ -229,7 +221,7 @@ test("choosing a lens in the sidebar shows it, still narrowed to the chosen chan
     screen.getByRole("button", { name: "#www" }).click();
   });
   act(() => {
-    screen.getByRole("button", { name: dictionary.lenses.tasks.title }).click();
+    fireEvent.keyDown(document.body, { key: "3" });
   });
 
   expect(
@@ -238,6 +230,22 @@ test("choosing a lens in the sidebar shows it, still narrowed to the chosen chan
   expect(
     screen.getByText(dictionary.lenses.narrowedTo("fleet/www")),
   ).toBeDefined();
+});
+
+test("? opens the sheet of shortcuts, and escape closes it", () => {
+  renderApplicationWhileTheCoreSays({ openBoard: boardOfAda, channels: [] });
+
+  act(() => {
+    fireEvent.keyDown(document.body, { key: "?", shiftKey: true });
+  });
+  const sheet = screen.getByRole("dialog", {
+    name: dictionary.shortcuts.title,
+  });
+  act(() => {
+    fireEvent.keyDown(sheet, { key: "Escape" });
+  });
+
+  expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 async function openInTheFinder(fakeCore: FakeCore, found: SearchResults) {

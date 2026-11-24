@@ -1,11 +1,4 @@
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  within,
-} from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { TaskChange, TaskRow } from "../../core/contract";
 import { createFakeCore } from "../../core/fake";
@@ -143,7 +136,7 @@ test("the chosen channel is marked, and the chosen lens stays the current page",
   expect(lensButton("Flow").getAttribute("aria-current")).toBe("page");
 });
 
-test("choosing a lens, by a click or by its key, asks to show it", () => {
+test("choosing a lens by a click asks to show it", () => {
   const onChooseLens = vi.fn();
   render(
     <Sidebar
@@ -157,37 +150,8 @@ test("choosing a lens, by a click or by its key, asks to show it", () => {
   );
 
   lensButton("Tasks").click();
-  act(() => {
-    fireEvent.keyDown(document.body, { key: "2" });
-  });
 
-  expect(onChooseLens.mock.calls).toEqual([["tasks"], ["flow"]]);
-});
-
-test("a lens's key typed into a box, or pressed with a modifier, chooses nothing", () => {
-  const onChooseLens = vi.fn();
-  render(
-    <>
-      <input aria-label="a box" />
-      <Sidebar
-        channels={[]}
-        chosenChannel={null}
-        chosenLens="flow"
-        onChooseChannel={nothing}
-        onChooseLens={onChooseLens}
-        {...countingNothing}
-      />
-    </>,
-  );
-
-  act(() => {
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "a box" }), {
-      key: "3",
-    });
-    fireEvent.keyDown(document.body, { key: "3", metaKey: true });
-  });
-
-  expect(onChooseLens).not.toHaveBeenCalled();
+  expect(onChooseLens.mock.calls).toEqual([["tasks"]]);
 });
 
 function task(id: string, state: string, channel = "fleet/www"): TaskRow {

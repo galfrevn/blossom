@@ -4,7 +4,7 @@ import { dictionary } from "../dictionary";
 import { LENSES } from "../frame/lenses";
 
 function actions() {
-  return { showLens: vi.fn(), widen: vi.fn() };
+  return { showLens: vi.fn(), widen: vi.fn(), showShortcuts: vi.fn() };
 }
 
 function commandTitled(commands: Command[], title: string): Command {
@@ -19,7 +19,9 @@ test("every lens has a command that goes to it, with the lens's key, in the side
   const commands = commandsOf({ lens: "flow", channel: null }, actions());
 
   expect(
-    commands.map(({ group, title, shortcut }) => ({ group, title, shortcut })),
+    commands
+      .filter((command) => command.group === "lenses")
+      .map(({ group, title, shortcut }) => ({ group, title, shortcut })),
   ).toEqual(
     LENSES.map((entry) => ({
       group: "lenses",
@@ -56,4 +58,16 @@ test("with the whole board on screen, no command widens it", () => {
   expect(commands.map((command) => command.title)).not.toContain(
     dictionary.lenses.widen,
   );
+});
+
+test("a command shows the sheet of shortcuts, with ?", () => {
+  const spies = actions();
+  const commands = commandsOf({ lens: "flow", channel: null }, spies);
+  const showing = commandTitled(commands, dictionary.commands.showShortcuts);
+
+  showing.run();
+
+  expect(showing.group).toBe("actions");
+  expect(showing.shortcut).toBe("?");
+  expect(spies.showShortcuts).toHaveBeenCalledOnce();
 });

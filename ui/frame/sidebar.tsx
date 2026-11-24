@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId } from "react";
+import { useCallback, useId } from "react";
 import type { TaskChange, TaskCount } from "../core/contract";
 import { dictionary } from "../dictionary";
 import type { Lens } from "./choice";
@@ -97,37 +97,6 @@ const ICON_OF_EACH_LENS: Record<Lens, () => React.ReactNode> = {
   flow: FlowIcon,
   tasks: TasksIcon,
 };
-
-function isTypingInto(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  const takesText =
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement;
-  return takesText || target.isContentEditable;
-}
-
-function useLensKeys(onChooseLens: (lens: Lens) => void) {
-  useEffect(() => {
-    const chooseTheLensOfTheKey = (event: KeyboardEvent) => {
-      const pressedWithModifiers =
-        event.metaKey || event.ctrlKey || event.altKey || event.shiftKey;
-      if (pressedWithModifiers || isTypingInto(event.target)) {
-        return;
-      }
-      const entry = LENSES.find((candidate) => candidate.key === event.key);
-      if (entry !== undefined) {
-        onChooseLens(entry.lens);
-      }
-    };
-    document.addEventListener("keydown", chooseTheLensOfTheKey);
-    return () => {
-      document.removeEventListener("keydown", chooseTheLensOfTheKey);
-    };
-  }, [onChooseLens]);
-}
 
 function Heading({ id, children }: { id: string; children: string }) {
   return (
@@ -241,7 +210,6 @@ export function Sidebar({
   };
   const lensesHeading = useId();
   const channelsHeading = useId();
-  useLensKeys(onChooseLens);
   return (
     <aside className="flex w-[212px] shrink-0 flex-col gap-3.5 overflow-auto border-line border-r bg-surface px-1.5 pt-2 pb-6">
       <section>

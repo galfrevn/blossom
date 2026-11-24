@@ -203,6 +203,21 @@ test("the arrow keys move the selection through Flow, and the pane follows", asy
   expect(await selectedLines()).toEqual(["second"]);
 });
 
+test("J and K move the selection as the arrow keys do", async () => {
+  renderFlowLensOf([firstLine, secondLine, thirdLine]);
+  await selectTheLineOf(firstLine);
+
+  press("j");
+  press("j");
+
+  expect(await selectedLines()).toEqual(["third"]);
+
+  press("k");
+
+  expect(await paneFor(secondLine)).toBeDefined();
+  expect(await selectedLines()).toEqual(["second"]);
+});
+
 test("the selection stops at the oldest and the newest lines", async () => {
   renderFlowLensOf([firstLine, secondLine]);
   await selectTheLineOf(firstLine);

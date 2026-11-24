@@ -6,6 +6,7 @@ import { LENSES } from "./frame/lenses";
 type Actions = {
   showLens: (lens: Lens) => void;
   widen: () => void;
+  showShortcuts: () => void;
 };
 
 function lensCommands(actions: Actions): Command[] {
@@ -34,6 +35,18 @@ function wideningCommands(choice: Choice, actions: Actions): Command[] {
   ];
 }
 
+function sheetCommands(actions: Actions): Command[] {
+  return [
+    {
+      id: "shortcuts",
+      group: "actions",
+      title: dictionary.commands.showShortcuts,
+      shortcut: "?",
+      run: actions.showShortcuts,
+    },
+  ];
+}
+
 export type Command = {
   id: string;
   group: "lenses" | "actions";
@@ -43,16 +56,17 @@ export type Command = {
 };
 
 export function commandsOf(choice: Choice, actions: Actions): Command[] {
-  return [...lensCommands(actions), ...wideningCommands(choice, actions)];
+  return [
+    ...lensCommands(actions),
+    ...wideningCommands(choice, actions),
+    ...sheetCommands(actions),
+  ];
 }
 
-export function useCommands(
-  choice: Choice,
-  showLens: (lens: Lens) => void,
-  widen: () => void,
-): Command[] {
+export function useCommands(choice: Choice, actions: Actions): Command[] {
+  const { showLens, widen, showShortcuts } = actions;
   return useMemo(
-    () => commandsOf(choice, { showLens, widen }),
-    [choice, showLens, widen],
+    () => commandsOf(choice, { showLens, widen, showShortcuts }),
+    [choice, showLens, widen, showShortcuts],
   );
 }
