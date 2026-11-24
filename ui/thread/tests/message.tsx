@@ -22,7 +22,7 @@ function renderMessage(overrides: Partial<ThreadMessage>) {
     deleted: false,
     ...overrides,
   };
-  render(<Message message={message} />);
+  render(<Message message={message} landed={false} />);
   return screen.getByRole("article");
 }
 

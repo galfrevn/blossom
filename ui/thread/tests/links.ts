@@ -76,3 +76,11 @@ test("a middle click beside a link opens nothing", () => {
 
   expect(linksOpened()).toEqual([]);
 });
+
+test("a click beside a link opens nothing", () => {
+  const { words, linksOpened } = renderLinks();
+
+  fireEvent.click(words);
+
+  expect(linksOpened()).toEqual([]);
+});

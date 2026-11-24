@@ -29,11 +29,18 @@ function Edited({ message }: { message: ThreadMessage }) {
   );
 }
 
-function MessageOfTheThread({ message }: { message: ThreadMessage }) {
+function MessageOfTheThread({
+  message,
+  landed,
+}: {
+  message: ThreadMessage;
+  landed: boolean;
+}) {
   return (
     <article
       data-message={message.id}
-      className="flex flex-col gap-[3px] border-line border-b py-2.5"
+      data-landed={landed}
+      className="flex flex-col gap-[3px] border-line border-b py-2.5 transition-colors duration-1000 data-[landed=true]:bg-accent-wash"
     >
       <header className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[12.5px]">
         <span className="font-medium">{message.author}</span>
@@ -67,12 +74,13 @@ function mentionTheSame(
 }
 
 function readsTheSame(
-  previous: { message: ThreadMessage },
-  next: { message: ThreadMessage },
+  previous: { message: ThreadMessage; landed: boolean },
+  next: { message: ThreadMessage; landed: boolean },
 ): boolean {
   const before = previous.message;
   const after = next.message;
   return (
+    previous.landed === next.landed &&
     before.id === after.id &&
     before.author === after.author &&
     before.onBehalfOf === after.onBehalfOf &&

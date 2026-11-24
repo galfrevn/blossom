@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { FlowChange, Thread } from "../core/contract";
 import { dictionary } from "../dictionary";
 import { isAtTheBottom } from "../flow/state";
+import { useLandingOnTheMessageAskedFor } from "./landing";
 import { useOpeningLinksInTheBrowser } from "./links";
 import { Message } from "./message";
 
@@ -99,12 +100,22 @@ function headingOf(read: ThreadRead | undefined): string {
   return dictionary.thread.inChannel(read.thread.channel);
 }
 
-function Messages({ read }: { read: ThreadRead | undefined }) {
+function Messages({
+  read,
+  landed,
+}: {
+  read: ThreadRead | undefined;
+  landed: string | undefined;
+}) {
   if (read === undefined) {
     return null;
   }
   return read.thread.messages.map((message) => (
-    <Message key={message.id} message={message} />
+    <Message
+      key={message.id}
+      message={message}
+      landed={message.id === landed}
+    />
   ));
 }
 
@@ -131,6 +142,11 @@ export function ThreadPane(props: ThreadPaneProps) {
   const headingId = useId();
   const read = useThreadOf(props, body);
   useKeepingToTheEnd(body, read);
+  const landed = useLandingOnTheMessageAskedFor(
+    body,
+    read?.thread,
+    props.messageId,
+  );
   useClosingOnEscape(props.onClose);
   useOpeningLinksInTheBrowser(pane, props.openLink);
   return (
@@ -152,7 +168,7 @@ export function ThreadPane(props: ThreadPaneProps) {
         aria-labelledby={headingId}
         className="flex min-h-0 flex-1 flex-col overflow-auto px-4 pt-4 pb-5"
       >
-        <Messages read={read} />
+        <Messages read={read} landed={landed} />
       </div>
     </aside>
   );

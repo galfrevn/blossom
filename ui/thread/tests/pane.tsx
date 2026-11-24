@@ -143,15 +143,21 @@ test("a click on what a link holds opens the link", async () => {
   expect(pane.linksOpened()).toEqual(["https://vercel.com/docs"]);
 });
 
-test("a link opens only when it is clicked", async () => {
-  const pane = renderPaneOf("root", [
-    threadOf([messageInThread({ id: "root", text: "see https://vercel.com" })]),
+test("the reply the pane was opened at is marked", async () => {
+  renderPaneOf("reply", [
+    threadOf([
+      messageInThread({ id: "root" }),
+      messageInThread({ id: "reply" }),
+    ]),
   ]);
-  await threadPane().findByRole("link");
+  const messages = await threadPane().findAllByRole("article");
 
-  fireEvent.click(threadPane().getByText("see", { exact: false }));
-
-  expect(pane.linksOpened()).toEqual([]);
+  await waitFor(() => {
+    expect(messages.map((message) => message.dataset.landed)).toEqual([
+      "false",
+      "true",
+    ]);
+  });
 });
 
 test("after the pane moves to another thread, its links still open", async () => {
